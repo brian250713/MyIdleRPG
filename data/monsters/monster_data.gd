@@ -70,6 +70,7 @@ static func _unit(sprite_id: String, unit_name: String, max_hp: float, attack: f
 			"chaos_resistance": 0.0,
 			"life_steal": 0.0
 		},
+		"balance": {"attack_multiplier": 0.35},
 		"growth": {
 			"max_hp": hp_growth,
 			"attack": 1.8,
@@ -94,6 +95,7 @@ static func _boss(sprite_id: String, boss_name: String, max_hp: float, attack: f
 	var definition: Dictionary = _unit(sprite_id, boss_name, max_hp, attack, attack_range, defense, attack_speed, crit_chance, 42.0, 2.0)
 	definition["is_boss"] = true
 	definition["visual_scale"] = visual_scale
+	definition["balance"] = {"hp_multiplier": 0.72, "attack_multiplier": 0.65, "hp_per_level": 0.016, "attack_per_level": 0.012, "defense_multiplier": 0.90}
 	definition["growth"]["attack"] = 3.8
 	definition["growth"]["crit_damage"] = 0.015
 	return definition

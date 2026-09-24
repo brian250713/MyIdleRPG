@@ -167,6 +167,7 @@ func _begin_stage(stage_index: int) -> void:
 	_last_status = "%s 出發" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
 	GameState.set_current_stage(_stage_index)
 	_spawn_heroes()
+	_fully_heal_party()
 	EventBus.stage_changed.emit(_stage_index, StageData.get_display_name(_stage_index, GameState.get_current_difficulty()))
 	EventBus.wave_changed.emit(1, wave_count, false)
 	stage_progress_changed.emit()
@@ -595,6 +596,7 @@ func _check_stage_completion() -> void:
 	if _wave_spawned and not _has_alive_monsters():
 		if _progression.get_phase() == StageProgression.Phase.WAVES:
 			var result: String = _progression.on_wave_cleared()
+			_heal_party_after_wave()
 			if result == "boss_started":
 				_spawn_boss()
 			else:
@@ -611,6 +613,22 @@ func _check_stage_completion() -> void:
 			_stage_clear_timer = 2.2
 			if not _progression.is_auto_advance():
 				_last_status = "%s 已通關，自動推進已關閉" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
+
+func _heal_party_after_wave() -> void:
+	var heal_ratio: float = clampf(float(_stage_data.get("wave_heal_ratio", StageData.WAVE_HEAL_RATIO)), 0.0, 1.0)
+	if heal_ratio <= 0.0:
+		return
+	for hero: BattleUnit in _heroes:
+		if is_instance_valid(hero) and hero.is_alive():
+			hero.heal(int(round(hero.max_hp * heal_ratio)))
+
+func _fully_heal_party() -> void:
+	var start_heal_ratio: float = clampf(float(_stage_data.get("stage_start_heal_ratio", StageData.STAGE_START_HEAL_RATIO)), 0.0, 1.0)
+	if start_heal_ratio <= 0.0:
+		return
+	for hero: BattleUnit in _heroes:
+		if is_instance_valid(hero) and hero.is_alive():
+			hero.heal(int(round(hero.max_hp * start_heal_ratio)))
 
 func _advance_after_clear() -> void:
 	var result: String = _progression.advance_to_next_stage()

@@ -5,6 +5,8 @@ const ACT_COUNT: int = 3
 const STAGES_PER_ACT: int = 10
 const TOTAL_STAGES: int = ACT_COUNT * STAGES_PER_ACT
 const NORMAL_DIFFICULTY: String = "普通"
+const WAVE_HEAL_RATIO: float = 0.30
+const STAGE_START_HEAL_RATIO: float = 1.0
 
 static func get_stage_table(difficulty_id: String = "normal") -> Array[Dictionary]:
 	var table: Array[Dictionary] = []
@@ -28,23 +30,20 @@ static func get_stage_table(difficulty_id: String = "normal") -> Array[Dictionar
 			var base_level: int = (act - 1) * STAGES_PER_ACT + stage
 			var is_boss: bool = stage == STAGES_PER_ACT
 			var pool: Array = []
-			var boss_id: String = ""
-			if is_boss:
-				boss_id = bosses[act - 1]
-				pool.append(boss_id)
-			else:
-				var first_pool: Array = pools[(stage - 1 + (act - 1) * 2) % pools.size()]
-				var second_pool: Array = pools[(stage + (act - 1) * 2) % pools.size()]
-				for monster_id: String in first_pool:
+			# 每個關卡都有五波後的關卡首領；第 10 關沿用同一首領並標記為幕首領。
+			var boss_id: String = bosses[act - 1]
+			var first_pool: Array = pools[(stage - 1 + (act - 1) * 2) % pools.size()]
+			var second_pool: Array = pools[(stage + (act - 1) * 2) % pools.size()]
+			for monster_id: String in first_pool:
+				if not pool.has(monster_id):
+					pool.append(monster_id)
+			for monster_id: String in second_pool:
+				if not pool.has(monster_id):
+					pool.append(monster_id)
+			if is_elemental_difficulty:
+				for monster_id: String in elemental_pool:
 					if not pool.has(monster_id):
 						pool.append(monster_id)
-				for monster_id: String in second_pool:
-					if not pool.has(monster_id):
-						pool.append(monster_id)
-				if is_elemental_difficulty:
-					for monster_id: String in elemental_pool:
-						if not pool.has(monster_id):
-							pool.append(monster_id)
 			table.append({
 				"index": table.size(),
 				"difficulty": difficulty_name,
@@ -54,6 +53,8 @@ static func get_stage_table(difficulty_id: String = "normal") -> Array[Dictionar
 				"recommended_level": base_level + level_offset,
 				"base_level": base_level,
 				"wave_count": 5,
+				"wave_heal_ratio": WAVE_HEAL_RATIO,
+				"stage_start_heal_ratio": STAGE_START_HEAL_RATIO,
 				"monster_pool": pool,
 				"boss": boss_id,
 				"is_act_boss": is_boss,

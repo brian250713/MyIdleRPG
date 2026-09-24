@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "godot": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "godot-mcp-bridge"]
+    }
+  }
+}

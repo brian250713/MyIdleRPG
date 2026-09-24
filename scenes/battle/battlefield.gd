@@ -14,6 +14,7 @@ const UnitScene: PackedScene = preload("res://scenes/battle/unit.tscn")
 const ProjectileScene: PackedScene = preload("res://scenes/battle/projectile.tscn")
 const DamageNumberScene: PackedScene = preload("res://scenes/battle/damage_number.tscn")
 const HitEffectScene: PackedScene = preload("res://scenes/battle/hit_effect.tscn")
+const ChestDropFeedbackScene: PackedScene = preload("res://scenes/battle/chest_drop_feedback.tscn")
 
 var _world_layer: Node2D
 var _heroes: Array[BattleUnit] = []
@@ -168,7 +169,7 @@ func _spawn_heroes() -> void:
 		var class_definition: Dictionary = ClassData.get_class_definition(class_id)
 		if class_definition.is_empty():
 			continue
-		var unit_stats: Dictionary = Stats.calculate_class_stats(class_id, int(hero_state.get("level", 1)))
+		var unit_stats: Dictionary = GameState.get_hero_stats(class_id)
 		var spawn_position: Vector2 = Vector2(_hero_formation_x(index), _ground_y())
 		var unit: BattleUnit = _create_unit(
 			str(class_definition.get("sprite", "f1_general")),
@@ -412,7 +413,23 @@ func _on_unit_died(unit: BattleUnit) -> void:
 	EventBus.unit_killed.emit(unit.display_name, unit.is_hero)
 	if not unit.is_hero:
 		GameState.grant_monster_rewards(unit.level, unit.is_boss)
+		var is_act_boss: bool = unit.is_boss and bool(_stage_data.get("is_act_boss", false))
+		var chest_result: Dictionary = GameState.try_drop_chest(unit.level, unit.is_boss, is_act_boss)
+		if bool(chest_result.get("dropped", false)):
+			var dropped_chests: Array = chest_result.get("chests", [])
+			for chest_index: int in range(dropped_chests.size()):
+				var chest_value: Variant = dropped_chests[chest_index]
+				if chest_value is Dictionary:
+					_spawn_chest_feedback(unit.position + Vector2(float(chest_index) * 24.0, 0.0), chest_value)
 	_last_status = "%s 被擊敗" % unit.display_name
+
+func _spawn_chest_feedback(drop_position: Vector2, chest: Dictionary) -> void:
+	var feedback: ChestDropFeedback = ChestDropFeedbackScene.instantiate() as ChestDropFeedback
+	if feedback == null:
+		return
+	_world_layer.add_child(feedback)
+	feedback.position = drop_position + Vector2(0.0, -48.0)
+	feedback.setup(str(chest.get("type", "white")))
 
 func _find_nearest_enemy(unit: BattleUnit, candidates: Array[BattleUnit]) -> BattleUnit:
 	var nearest: BattleUnit = null

@@ -24,6 +24,15 @@ func _run_capture() -> void:
 		return
 	var main_scene: Node = packed_scene.instantiate()
 	root.add_child(main_scene)
+	if OS.get_environment("CAP_DEBUG_LOOT") == "1":
+		game_state.call("seed_debug_loot")
+	var selected_tab: String = OS.get_environment("CAP_TAB")
+	if not selected_tab.is_empty():
+		var expanded_panel: Node = main_scene.get_node("Layout/ExpandedPanel")
+		expanded_panel.call("select_tab", selected_tab)
+		var selected_item_text: String = OS.get_environment("CAP_SELECT_ITEM")
+		if not selected_item_text.is_empty():
+			expanded_panel.call("select_inventory_slot", selected_item_text.to_int())
 	await process_frame
 	await _wait_for_seconds(wait_seconds)
 	await process_frame

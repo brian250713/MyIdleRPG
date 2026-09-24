@@ -1,4 +1,4 @@
-# 只匯入 P1 會使用的 Duelyst CC0 素材
+# 匯入 P1/P2 會使用的 Duelyst CC0 素材
 # 格式：<spritesheets/spriteframes 類別>/<檔名（不含副檔名）>
 units/f1_general
 units/f1_altgeneral
@@ -19,3 +19,13 @@ units/boss_chaosknight
 units/boss_legion
 fx/fx_impact
 fx/fx_impactred
+icons/artifact_f3_spinecleaver
+icons/artifact_f3_repairstaff
+icons/artifact_f2_crescentspear
+icons/artifact_f2_spellfan
+icons/artifact_f2_maskofshadows
+icons/artifact_f1_bigshield
+icons/artifact_f1_sunstonebracers
+icons/artifact_f6_snowshovel
+icons/artifact_f4_darkstonering
+icons/artifact_f2_unboundedenergyamulet

@@ -14,6 +14,10 @@ func _ready() -> void:
 	state = SaveCodec.make_default_state()
 	_rng.seed = 20260924
 
+func _process(delta: float) -> void:
+	if state.has("chests"):
+		Chests.tick(state["chests"], delta)
+
 func apply_loaded_state(loaded_state: Dictionary) -> void:
 	state = SaveCodec.normalize_state(loaded_state)
 	_notify_state_changed()
@@ -90,6 +94,20 @@ func get_hero_level(class_id: String) -> int:
 	var hero: Dictionary = get_hero(class_id)
 	return int(hero.get("level", 1))
 
+func get_hero_stats(class_id: String) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	return Stats.calculate_final_stats(class_id, int(hero.get("level", 1)), get_equipment(class_id))
+
+func get_hero_power(class_id: String) -> int:
+	return Power.calculate(get_hero_stats(class_id))
+
+func get_equipment(class_id: String) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	var equipment_value: Variant = hero.get("equipment", {})
+	if equipment_value is Dictionary:
+		return (equipment_value as Dictionary).duplicate(true)
+	return {}
+
 func get_highest_party_level() -> int:
 	var highest: int = 1
 	for hero: Dictionary in get_active_heroes():
@@ -119,14 +137,10 @@ func get_unlocked_party_slots() -> int:
 	return result
 
 func is_party_slot_unlocked(slot_index: int) -> bool:
-	if slot_index < 0 or slot_index >= get_unlocked_party_slots():
-		return false
-	return true
+	return slot_index >= 0 and slot_index < get_unlocked_party_slots()
 
 func set_party_slot(slot_index: int, class_id: String) -> bool:
-	if not is_party_slot_unlocked(slot_index):
-		return false
-	if ClassData.get_class_definition(class_id).is_empty():
+	if not is_party_slot_unlocked(slot_index) or ClassData.get_class_definition(class_id).is_empty():
 		return false
 	var party: Array = get_party()
 	for index: int in range(party.size()):
@@ -137,13 +151,10 @@ func set_party_slot(slot_index: int, class_id: String) -> bool:
 			return false
 	while party.size() < 3:
 		party.append(null)
-	party[slot_index] = {
-		"class_id": class_id,
-		"level": 1,
-		"xp": 0
-	}
+	party[slot_index] = _make_hero_state(class_id)
 	state["party"] = party
 	_notify_state_changed()
+	EventBus.equipment_changed.emit(class_id)
 	return true
 
 func add_hero_xp(class_id: String, amount: int) -> Dictionary:
@@ -153,13 +164,7 @@ func add_hero_xp(class_id: String, amount: int) -> Dictionary:
 	var result: Dictionary = XPCurve.apply_xp(int(hero.get("level", 1)), int(hero.get("xp", 0)), amount)
 	hero["level"] = int(result["level"])
 	hero["xp"] = int(result["xp"])
-	var party: Array = get_party()
-	for index: int in range(party.size()):
-		var party_value: Variant = party[index]
-		if party_value is Dictionary and str(party_value.get("class_id", "")) == class_id:
-			party[index] = hero
-			break
-	state["party"] = party
+	_update_party_hero(hero)
 	hero_xp_changed.emit(class_id, int(hero["level"]), int(hero["xp"]))
 	EventBus.hero_xp_changed.emit(class_id, int(hero["level"]), int(hero["xp"]))
 	if int(result["levels_gained"]) > 0:
@@ -170,19 +175,218 @@ func add_hero_xp(class_id: String, amount: int) -> Dictionary:
 
 func grant_monster_rewards(monster_level: int, is_boss: bool = false) -> Dictionary:
 	var reward: Dictionary = Rewards.calculate_rewards(monster_level, is_boss)
-	add_gold(int(reward.get("gold", 0)))
+	var gold_multiplier: float = 1.0
+	for hero: Dictionary in get_active_heroes():
+		var hero_stats: Dictionary = get_hero_stats(str(hero.get("class_id", "")))
+		gold_multiplier = maxf(gold_multiplier, 1.0 + float(hero_stats.get("gold_gain", 0.0)))
+	var granted_gold: int = maxi(1, int(round(float(reward.get("gold", 0)) * gold_multiplier)))
+	add_gold(granted_gold)
 	var total_xp: int = 0
 	var multiplier: float = 5.0 if is_boss else 1.0
 	for hero: Dictionary in get_active_heroes():
 		var class_id: String = str(hero.get("class_id", ""))
-		var amount: int = XPCurve.experience_reward(monster_level, int(hero.get("level", 1)), multiplier)
+		var hero_stats: Dictionary = get_hero_stats(class_id)
+		var xp_multiplier: float = multiplier * (1.0 + float(hero_stats.get("xp_gain", 0.0)))
+		var amount: int = XPCurve.experience_reward(monster_level, int(hero.get("level", 1)), xp_multiplier)
 		add_hero_xp(class_id, amount)
 		total_xp += amount
-	return {
-		"gold": int(reward.get("gold", 0)),
-		"xp": total_xp,
-		"is_boss": is_boss
-	}
+	return {"gold": granted_gold, "xp": total_xp, "is_boss": is_boss}
+
+func get_inventory() -> Dictionary:
+	return (state.get("inventory", Inventory.create_inventory()) as Dictionary).duplicate(true)
+
+func get_inventory_item(slot_index: int) -> Dictionary:
+	return Inventory.get_item_at(get_inventory(), slot_index)
+
+func add_item(item: Dictionary) -> Dictionary:
+	var inventory: Dictionary = get_inventory()
+	var result: Dictionary = Inventory.add_item(inventory, item, bool(get_setting("auto_sell_common", false)), bool(get_setting("auto_sell_uncommon", false)))
+	state["inventory"] = inventory
+	if bool(result.get("converted_to_gold", false)):
+		add_gold(int(result.get("gold", 0)))
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	return result
+
+func equip_item(class_id: String, inventory_index: int) -> Dictionary:
+	var item: Dictionary = get_inventory_item(inventory_index)
+	if item.is_empty() or not ItemData.can_equip_item(item, class_id):
+		return {"equipped": false, "reason": "incompatible"}
+	var hero: Dictionary = get_hero(class_id)
+	if hero.is_empty():
+		return {"equipped": false, "reason": "missing_hero"}
+	var slot_id: String = str(item.get("slot", ""))
+	var inventory: Dictionary = get_inventory()
+	var removed: Dictionary = Inventory.remove_item(inventory, inventory_index)
+	if not bool(removed.get("removed", false)):
+		return {"equipped": false, "reason": "missing_item"}
+	var equipment: Dictionary = get_equipment(class_id)
+	var old_item_value: Variant = equipment.get(slot_id, null)
+	if old_item_value is Dictionary:
+		var old_result: Dictionary = Inventory.add_item(inventory, old_item_value, bool(get_setting("auto_sell_common", false)), bool(get_setting("auto_sell_uncommon", false)))
+		if bool(old_result.get("converted_to_gold", false)):
+			add_gold(int(old_result.get("gold", 0)))
+	equipment[slot_id] = item.duplicate(true)
+	hero["equipment"] = equipment
+	state["inventory"] = inventory
+	_update_party_hero(hero)
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	EventBus.equipment_changed.emit(class_id)
+	return {"equipped": true, "slot": slot_id, "item": item.duplicate(true)}
+
+func unequip_item(class_id: String, slot_id: String) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	if hero.is_empty() or not ItemData.get_slot_ids().has(slot_id):
+		return {"removed": false, "reason": "invalid_slot"}
+	var equipment: Dictionary = get_equipment(class_id)
+	var item_value: Variant = equipment.get(slot_id, null)
+	if not (item_value is Dictionary):
+		return {"removed": false, "reason": "empty_slot"}
+	var item: Dictionary = item_value
+	equipment[slot_id] = null
+	hero["equipment"] = equipment
+	_update_party_hero(hero)
+	var inventory: Dictionary = get_inventory()
+	var add_result: Dictionary = Inventory.add_item(inventory, item, bool(get_setting("auto_sell_common", false)), bool(get_setting("auto_sell_uncommon", false)))
+	state["inventory"] = inventory
+	if bool(add_result.get("converted_to_gold", false)):
+		add_gold(int(add_result.get("gold", 0)))
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	EventBus.equipment_changed.emit(class_id)
+	return {"removed": true, "item": item, "converted_to_gold": bool(add_result.get("converted_to_gold", false)), "gold": int(add_result.get("gold", 0))}
+
+func sell_inventory_item(slot_index: int) -> Dictionary:
+	var inventory: Dictionary = get_inventory()
+	var result: Dictionary = Inventory.sell_item(inventory, slot_index)
+	state["inventory"] = inventory
+	if bool(result.get("removed", false)):
+		add_gold(int(result.get("gold", 0)))
+		_notify_state_changed()
+		EventBus.inventory_changed.emit()
+	return result
+
+func sell_items_by_rarity(rarity: String) -> Dictionary:
+	var inventory: Dictionary = get_inventory()
+	var result: Dictionary = Inventory.sell_by_rarity(inventory, rarity)
+	state["inventory"] = inventory
+	if int(result.get("sold_count", 0)) > 0:
+		add_gold(int(result.get("gold", 0)))
+		_notify_state_changed()
+		EventBus.inventory_changed.emit()
+	return result
+
+func get_chest_state() -> Dictionary:
+	return (state.get("chests", Chests.create_state()) as Dictionary).duplicate(true)
+
+func get_chest_counts() -> Dictionary:
+	return Chests.get_counts(get_chest_state())
+
+func get_soul_stones() -> int:
+	return maxi(0, int(state.get("soul_stones", 0)))
+
+func set_auto_open(chest_type: String, enabled: bool) -> void:
+	var chests: Dictionary = get_chest_state()
+	Chests.set_auto_open(chests, chest_type, enabled)
+	state["chests"] = chests
+	var setting_key: String = "auto_open_%s" % chest_type
+	set_setting(setting_key, enabled)
+	_notify_state_changed()
+
+func try_drop_chest(monster_level: int, is_stage_boss: bool, is_act_boss: bool) -> Dictionary:
+	var chests: Dictionary = get_chest_state()
+	var result: Dictionary = Chests.try_drop_for_kill(chests, monster_level, is_stage_boss, is_act_boss, _rng)
+	state["chests"] = chests
+	if bool(result.get("dropped", false)):
+		var chest_values: Array = result.get("chests", [])
+		for chest_value: Variant in chest_values:
+			if chest_value is Dictionary:
+				EventBus.chest_dropped.emit(str(chest_value.get("type", "white")), int(chest_value.get("level", monster_level)))
+		open_auto_chests()
+		EventBus.chest_changed.emit()
+	_notify_state_changed()
+	return result
+
+func open_chest(queue_index: int) -> Dictionary:
+	var chests: Dictionary = get_chest_state()
+	var result: Dictionary = Chests.open_chest(chests, queue_index, _rng)
+	state["chests"] = chests
+	if not bool(result.get("opened", false)):
+		return result
+	var items: Array = result.get("items", [])
+	for item_value: Variant in items:
+		if item_value is Dictionary:
+			add_item(item_value)
+	if int(result.get("gold", 0)) > 0:
+		add_gold(int(result.get("gold", 0)))
+	if int(result.get("soul_stones", 0)) > 0:
+		state["soul_stones"] = get_soul_stones() + int(result.get("soul_stones", 0))
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	EventBus.chest_opened.emit(result)
+	EventBus.chest_changed.emit()
+	return result
+
+func open_next_chest() -> Dictionary:
+	var chests: Dictionary = get_chest_state()
+	var queue: Array = chests.get("queue", [])
+	if queue.is_empty():
+		return {"opened": false, "reason": "empty_queue"}
+	return open_chest(0)
+
+func open_auto_chests() -> void:
+	var chests: Dictionary = get_chest_state()
+	var queue: Array[Dictionary] = Chests.get_queue(chests)
+	var opened_any: bool = true
+	while opened_any:
+		opened_any = false
+		queue = Chests.get_queue(chests)
+		for index: int in range(queue.size()):
+			var chest_type: String = str(queue[index].get("type", "white"))
+			if Chests.is_auto_open_enabled(chests, chest_type):
+				var result: Dictionary = open_chest(index)
+				if bool(result.get("opened", false)):
+					opened_any = true
+				break
+		chests = get_chest_state()
+
+func seed_debug_loot() -> void:
+	var debug_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	debug_rng.seed = 424242
+	var generated: Array[Dictionary] = [
+		ItemGen.generate_item(5, debug_rng, "rare", "knight", "weapon"),
+		ItemGen.generate_item(6, debug_rng, "epic", "knight", "chest"),
+		ItemGen.generate_item(4, debug_rng, "uncommon", "knight", "ring"),
+		ItemGen.generate_item(7, debug_rng, "legendary", "", "helmet"),
+		ItemGen.generate_item(8, debug_rng, "rare", "", "boots"),
+		ItemGen.generate_item(9, debug_rng, "immortal", "", "gloves"),
+		ItemGen.generate_item(10, debug_rng, "common", "", "amulet")
+	]
+	var inventory: Dictionary = get_inventory()
+	for item: Dictionary in generated:
+		Inventory.add_item(inventory, item)
+	state["inventory"] = inventory
+	var hero: Dictionary = get_hero("knight")
+	if not hero.is_empty():
+		var equipment: Dictionary = get_equipment("knight")
+		equipment["weapon"] = generated[0].duplicate(true)
+		equipment["chest"] = generated[1].duplicate(true)
+		equipment["ring"] = generated[2].duplicate(true)
+		hero["equipment"] = equipment
+		_update_party_hero(hero)
+	var chest_state: Dictionary = Chests.create_state()
+	chest_state["queue"] = [
+		{"type": "white", "level": 5, "id": "debug_white"},
+		{"type": "blue", "level": 10, "id": "debug_blue"},
+		{"type": "act_boss", "level": 10, "id": "debug_act"}
+	]
+	state["chests"] = chest_state
+	state["soul_stones"] = 2
+	add_gold(2500)
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	EventBus.chest_changed.emit()
 
 func set_last_saved_unix(unix_time: int) -> void:
 	state["last_saved_unix"] = maxi(0, unix_time)
@@ -196,3 +400,18 @@ func get_rng() -> RandomNumberGenerator:
 
 func set_rng_seed(seed_value: int) -> void:
 	_rng.seed = seed_value
+
+func _make_hero_state(class_id: String) -> Dictionary:
+	var equipment: Dictionary = {}
+	for slot_id: String in ItemData.get_slot_ids():
+		equipment[slot_id] = null
+	return {"class_id": class_id, "level": 1, "xp": 0, "equipment": equipment}
+
+func _update_party_hero(hero: Dictionary) -> void:
+	var party: Array = get_party()
+	for index: int in range(party.size()):
+		var hero_value: Variant = party[index]
+		if hero_value is Dictionary and str(hero_value.get("class_id", "")) == str(hero.get("class_id", "")):
+			party[index] = hero.duplicate(true)
+			break
+	state["party"] = party

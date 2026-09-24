@@ -1,7 +1,7 @@
 class_name SaveCodec
 extends RefCounted
 
-const VERSION: int = 1
+const VERSION: int = 2
 
 static func make_default_state() -> Dictionary:
 	return {
@@ -11,11 +11,10 @@ static func make_default_state() -> Dictionary:
 		"unlocked_stage": 0,
 		"unlocked_party_slots": 1,
 		"party": [_make_hero("knight"), null, null],
-		"settings": {
-			"auto_advance": true,
-			"always_on_top": true,
-			"expanded": false
-		},
+		"inventory": Inventory.create_inventory(),
+		"chests": Chests.create_state(),
+		"soul_stones": 0,
+		"settings": _default_settings(),
 		"last_saved_unix": 0
 	}
 
@@ -26,6 +25,7 @@ static func encode_state(state: Dictionary) -> Dictionary:
 
 static func normalize_state(state: Dictionary) -> Dictionary:
 	var normalized: Dictionary = make_default_state()
+	var source_version: int = int(state.get("version", 1))
 	for raw_key: Variant in state.keys():
 		var key: String = str(raw_key)
 		if key == "party":
@@ -44,15 +44,36 @@ static func normalize_state(state: Dictionary) -> Dictionary:
 				var normalized_settings: Dictionary = normalized["settings"]
 				for setting_key: Variant in source_settings.keys():
 					normalized_settings[str(setting_key)] = source_settings[setting_key]
+		elif key == "inventory":
+			var source_inventory: Dictionary = state.get("inventory", {})
+			normalized["inventory"] = Inventory.normalize_inventory(source_inventory)
+		elif key == "chests":
+			var source_chests: Dictionary = state.get("chests", {})
+			normalized["chests"] = Chests.normalize_state(source_chests)
 		elif key == "version":
 			continue
 		else:
 			normalized[key] = state[key]
+	normalized["version"] = VERSION
+	var normalized_settings: Dictionary = normalized["settings"]
+	var normalized_chests: Dictionary = normalized["chests"]
+	var source_settings_value: Variant = state.get("settings", {})
+	for chest_type: String in ["white", "blue", "act_boss"]:
+		var setting_key: String = "auto_open_%s" % chest_type
+		if source_settings_value is Dictionary and (source_settings_value as Dictionary).has(setting_key):
+			normalized_chests["auto_open"][chest_type] = bool(normalized_settings.get(setting_key, false))
+		else:
+			normalized_settings[setting_key] = bool(normalized_chests.get("auto_open", {}).get(chest_type, false))
 	normalized["unlocked_stage"] = clampi(int(normalized.get("unlocked_stage", 0)), 0, StageData.get_stage_count() - 1)
 	normalized["unlocked_party_slots"] = clampi(int(normalized.get("unlocked_party_slots", 1)), 1, 3)
 	normalized["current_stage"] = clampi(int(normalized.get("current_stage", 0)), 0, int(normalized["unlocked_stage"]))
 	normalized["gold"] = maxi(0, int(normalized.get("gold", 0)))
+	normalized["soul_stones"] = maxi(0, int(normalized.get("soul_stones", 0)))
 	normalized["last_saved_unix"] = maxi(0, int(normalized.get("last_saved_unix", 0)))
+	if source_version < 2:
+		normalized["inventory"] = Inventory.create_inventory() if not state.has("inventory") else normalized["inventory"]
+		normalized["chests"] = Chests.create_state() if not state.has("chests") else normalized["chests"]
+		normalized["soul_stones"] = int(normalized.get("soul_stones", 0))
 	return normalized
 
 static func state_to_json(state: Dictionary) -> String:
@@ -64,19 +85,51 @@ static func state_from_json(json_text: String) -> Dictionary:
 		return make_default_state()
 	return normalize_state(parsed)
 
+static func _default_settings() -> Dictionary:
+	return {
+		"auto_advance": true,
+		"always_on_top": true,
+		"expanded": false,
+		"auto_open_white": false,
+		"auto_open_blue": false,
+		"auto_open_act_boss": false,
+		"auto_sell_common": false,
+		"auto_sell_uncommon": false
+	}
+
 static func _make_hero(class_id: String) -> Dictionary:
 	return {
 		"class_id": class_id,
 		"level": 1,
-		"xp": 0
+		"xp": 0,
+		"equipment": _empty_equipment()
 	}
 
 static func _normalize_hero(hero: Dictionary) -> Dictionary:
 	var class_id: String = str(hero.get("class_id", "knight"))
 	if ClassData.get_class_definition(class_id).is_empty():
 		class_id = "knight"
+	var equipment_value: Variant = hero.get("equipment", {})
+	var equipment: Dictionary = _empty_equipment()
+	if equipment_value is Dictionary:
+		equipment = _normalize_equipment(equipment_value)
 	return {
 		"class_id": class_id,
 		"level": clampi(int(hero.get("level", 1)), 1, Stats.MAX_LEVEL),
-		"xp": maxi(0, int(hero.get("xp", 0)))
+		"xp": maxi(0, int(hero.get("xp", 0))),
+		"equipment": equipment
 	}
+
+static func _normalize_equipment(source: Dictionary) -> Dictionary:
+	var equipment: Dictionary = _empty_equipment()
+	for slot_id: String in ItemData.get_slot_ids():
+		var item_value: Variant = source.get(slot_id, null)
+		if item_value is Dictionary:
+			equipment[slot_id] = (item_value as Dictionary).duplicate(true)
+	return equipment
+
+static func _empty_equipment() -> Dictionary:
+	var equipment: Dictionary = {}
+	for slot_id: String in ItemData.get_slot_ids():
+		equipment[slot_id] = null
+	return equipment

@@ -22,3 +22,13 @@ signal party_wiped
 signal setting_changed(key: String, value: Variant)
 @warning_ignore("unused_signal")
 signal damage_dealt(amount: int, is_crit: bool, position: Vector2)
+@warning_ignore("unused_signal")
+signal chest_dropped(chest_type: String, item_level: int)
+@warning_ignore("unused_signal")
+signal chest_opened(result: Dictionary)
+@warning_ignore("unused_signal")
+signal inventory_changed
+@warning_ignore("unused_signal")
+signal equipment_changed(class_id: String)
+@warning_ignore("unused_signal")
+signal chest_changed

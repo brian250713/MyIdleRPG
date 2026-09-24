@@ -4,6 +4,7 @@ extends PanelContainer
 signal expand_requested
 signal auto_advance_changed(enabled: bool)
 signal always_on_top_changed(enabled: bool)
+signal open_chests_requested
 
 var _battlefield: Battlefield
 var _gold_label: Label
@@ -11,6 +12,9 @@ var _stage_label: Label
 var _auto_button: CheckButton
 var _topmost_button: Button
 var _expand_button: Button
+var _chest_label: Label
+var _soul_label: Label
+var _open_chests_button: Button
 var _party_rows: VBoxContainer
 var _updating_controls: bool = false
 
@@ -85,6 +89,23 @@ func _build_interface() -> void:
 	_expand_button.pressed.connect(_on_expand_pressed)
 	top_row.add_child(_expand_button)
 
+	var chest_row: HBoxContainer = HBoxContainer.new()
+	chest_row.name = "ChestRow"
+	chest_row.custom_minimum_size = Vector2(0.0, 24.0)
+	chest_row.add_theme_constant_override("separation", 5)
+	column.add_child(chest_row)
+	_chest_label = _make_label("箱 白0 藍0 幕0", 11, Color(0.82, 0.88, 0.98))
+	_chest_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chest_row.add_child(_chest_label)
+	_soul_label = _make_label("靈魂石 0", 10, Color(0.72, 0.76, 1.0))
+	chest_row.add_child(_soul_label)
+	_open_chests_button = Button.new()
+	_open_chests_button.text = "開箱"
+	_open_chests_button.focus_mode = Control.FOCUS_NONE
+	_open_chests_button.add_theme_font_size_override("font_size", 14)
+	_open_chests_button.pressed.connect(_on_open_chests_pressed)
+	chest_row.add_child(_open_chests_button)
+
 	var separator: HSeparator = HSeparator.new()
 	separator.custom_minimum_size = Vector2(0.0, 2.0)
 	column.add_child(separator)
@@ -101,6 +122,10 @@ func _update_top_controls() -> void:
 	_auto_button.button_pressed = bool(GameState.get_setting("auto_advance", true))
 	_topmost_button.text = "置頂：開" if bool(GameState.get_setting("always_on_top", true)) else "置頂：關"
 	_expand_button.text = "收合" if WindowManager.is_expanded() else "展開"
+	var chest_counts: Dictionary = GameState.get_chest_counts()
+	_chest_label.text = "箱 白%d 藍%d 幕%d" % [int(chest_counts.get("white", 0)), int(chest_counts.get("blue", 0)), int(chest_counts.get("act_boss", 0))]
+	_soul_label.text = "靈魂石 %d" % GameState.get_soul_stones()
+	_open_chests_button.disabled = Chests.get_queue_size(GameState.get_chest_state()) == 0
 	_updating_controls = false
 
 func _update_stage_text() -> void:
@@ -179,6 +204,9 @@ func _on_topmost_pressed() -> void:
 
 func _on_expand_pressed() -> void:
 	expand_requested.emit()
+
+func _on_open_chests_pressed() -> void:
+	open_chests_requested.emit()
 
 func _make_label(text: String, font_size: int, color: Color) -> Label:
 	var label: Label = Label.new()

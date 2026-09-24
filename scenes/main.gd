@@ -14,6 +14,7 @@ func _ready() -> void:
 	_hud.expand_requested.connect(_on_expand_requested)
 	_hud.auto_advance_changed.connect(_on_auto_advance_changed)
 	_hud.always_on_top_changed.connect(_on_always_on_top_changed)
+	_hud.open_chests_requested.connect(_on_open_chests_requested)
 	_expanded_panel.stage_selected.connect(_on_stage_selected)
 	_expanded_panel.auto_advance_changed.connect(_on_auto_advance_changed)
 	_battlefield.start_campaign()
@@ -43,3 +44,6 @@ func _on_always_on_top_changed(_enabled: bool) -> void:
 
 func _on_stage_selected(stage_index: int) -> void:
 	_battlefield.select_stage(stage_index)
+
+func _on_open_chests_requested() -> void:
+	GameState.open_next_chest()

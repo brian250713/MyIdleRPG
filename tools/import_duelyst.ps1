@@ -55,4 +55,4 @@ if (-not (Test-Path -LiteralPath $licenseSource -PathType Leaf)) {
 Copy-Item -LiteralPath $licenseSource -Destination $licenseDestination -Force
 $copied = $copied + 1
 
-Write-Host "Duelyst P1 asset import complete: $copied files -> $DestinationRoot"
+Write-Host "Duelyst asset import complete: $copied files -> $DestinationRoot"

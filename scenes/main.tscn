@@ -1,0 +1,47 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scenes/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/battle/battlefield.tscn" id="2_battlefield"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="3_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/expanded_panel.tscn" id="4_expanded_panel"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_main")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="ExpandedPanel" parent="Layout" instance=ExtResource("4_expanded_panel")]
+visible = false
+layout_mode = 2
+size_flags_vertical = 0
+
+[node name="BottomBar" type="HBoxContainer" parent="Layout"]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 1
+
+[node name="Battlefield" parent="Layout/BottomBar" instance=ExtResource("2_battlefield")]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="HUD" parent="Layout/BottomBar" instance=ExtResource("3_hud")]
+custom_minimum_size = Vector2(380, 180)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 3

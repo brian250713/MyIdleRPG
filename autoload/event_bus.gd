@@ -1,0 +1,24 @@
+extends Node
+
+@warning_ignore("unused_signal")
+signal state_changed
+@warning_ignore("unused_signal")
+signal gold_changed(new_gold: int)
+@warning_ignore("unused_signal")
+signal hero_xp_changed(class_id: String, level: int, xp: int)
+@warning_ignore("unused_signal")
+signal hero_leveled_up(class_id: String, level: int)
+@warning_ignore("unused_signal")
+signal stage_changed(stage_index: int, display_name: String)
+@warning_ignore("unused_signal")
+signal wave_changed(wave_number: int, wave_count: int, boss_active: bool)
+@warning_ignore("unused_signal")
+signal unit_killed(unit_name: String, is_hero: bool)
+@warning_ignore("unused_signal")
+signal stage_cleared(stage_index: int)
+@warning_ignore("unused_signal")
+signal party_wiped
+@warning_ignore("unused_signal")
+signal setting_changed(key: String, value: Variant)
+@warning_ignore("unused_signal")
+signal damage_dealt(amount: int, is_crit: bool, position: Vector2)

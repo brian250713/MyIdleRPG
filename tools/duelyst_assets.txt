@@ -1,0 +1,21 @@
+# 只匯入 P1 會使用的 Duelyst CC0 素材
+# 格式：<spritesheets/spriteframes 類別>/<檔名（不含副檔名）>
+units/f1_general
+units/f1_altgeneral
+units/f1_ranged
+units/f2_caster
+units/neutral_gnasher
+units/neutral_ghostlynx
+units/neutral_giantcrab
+units/neutral_golemstone
+units/neutral_mercpirate
+units/neutral_mercmelee1
+units/neutral_monsterdragonhawk
+units/neutral_monsterlightningbeetle
+units/neutral_monstercrystalwisp
+units/neutral_prongbok
+units/boss_andromeda
+units/boss_chaosknight
+units/boss_legion
+fx/fx_impact
+fx/fx_impactred

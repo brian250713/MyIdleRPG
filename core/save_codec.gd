@@ -1,7 +1,7 @@
 class_name SaveCodec
 extends RefCounted
 
-const VERSION: int = 3
+const VERSION: int = 4
 
 static func make_default_state() -> Dictionary:
 	return {
@@ -16,8 +16,12 @@ static func make_default_state() -> Dictionary:
 		"cleared_difficulties": [],
 		"party": [_make_hero("knight"), null, null],
 		"inventory": Inventory.create_inventory(),
+		"materials": Materials.create_state(),
 		"chests": Chests.create_state(),
 		"soul_stones": 0,
+		"cube": Cube.create_state(),
+		"runes": Runes.create_state(),
+		"paid_act_bosses": {},
 		"settings": _default_settings(),
 		"last_saved_unix": 0
 	}
@@ -52,6 +56,22 @@ static func normalize_state(state: Dictionary) -> Dictionary:
 			var source_inventory_value: Variant = state.get("inventory", {})
 			if source_inventory_value is Dictionary:
 				normalized["inventory"] = Inventory.normalize_inventory(source_inventory_value as Dictionary)
+		elif key == "materials":
+			var source_materials_value: Variant = state.get("materials", {})
+			if source_materials_value is Dictionary:
+				normalized["materials"] = Materials.normalize_state(source_materials_value as Dictionary)
+		elif key == "cube":
+			var source_cube_value: Variant = state.get("cube", {})
+			if source_cube_value is Dictionary:
+				normalized["cube"] = Cube.normalize_state(source_cube_value as Dictionary)
+		elif key == "runes":
+			var source_runes_value: Variant = state.get("runes", {})
+			if source_runes_value is Dictionary:
+				normalized["runes"] = Runes.normalize_state(source_runes_value as Dictionary)
+		elif key == "paid_act_bosses":
+			var source_paid_value: Variant = state.get("paid_act_bosses", {})
+			if source_paid_value is Dictionary:
+				normalized["paid_act_bosses"] = _normalize_paid_act_bosses(source_paid_value as Dictionary)
 		elif key == "chests":
 			var source_chests_value: Variant = state.get("chests", {})
 			if source_chests_value is Dictionary:
@@ -110,10 +130,23 @@ static func normalize_state(state: Dictionary) -> Dictionary:
 	normalized["gold"] = maxi(0, int(normalized.get("gold", 0)))
 	normalized["soul_stones"] = maxi(0, int(normalized.get("soul_stones", 0)))
 	normalized["last_saved_unix"] = maxi(0, int(normalized.get("last_saved_unix", 0)))
+	if source_version < 4:
+		normalized["materials"] = Materials.normalize_state(normalized.get("materials", {}))
+		normalized["cube"] = Cube.normalize_state(normalized.get("cube", {}))
+		normalized["runes"] = Runes.normalize_state(normalized.get("runes", {}))
+		normalized["paid_act_bosses"] = _normalize_paid_act_bosses(normalized.get("paid_act_bosses", {}))
+		var rune_state: Dictionary = normalized["runes"]
+		normalized["inventory"] = Inventory.ensure_pages(normalized["inventory"], Runes.get_inventory_pages(rune_state))
+		var chest_state: Dictionary = normalized["chests"]
+		normalized["chests"] = Chests.set_rune_effects(chest_state, Runes.get_white_chest_rate(rune_state), Runes.get_chest_capacity(rune_state), Runes.get_boss_chest_quality(rune_state))
 	if source_version < 2:
 		normalized["inventory"] = Inventory.create_inventory() if not state.has("inventory") else normalized["inventory"]
 		normalized["chests"] = Chests.create_state() if not state.has("chests") else normalized["chests"]
 		normalized["soul_stones"] = int(normalized.get("soul_stones", 0))
+	var normalized_runes: Dictionary = normalized["runes"]
+	normalized["inventory"] = Inventory.ensure_pages(normalized["inventory"], Runes.get_inventory_pages(normalized_runes))
+	var normalized_chests_for_runes: Dictionary = normalized["chests"]
+	normalized["chests"] = Chests.set_rune_effects(normalized_chests_for_runes, Runes.get_white_chest_rate(normalized_runes), Runes.get_chest_capacity(normalized_runes), Runes.get_boss_chest_quality(normalized_runes))
 	return normalized
 
 static func state_to_json(state: Dictionary) -> String:
@@ -170,6 +203,14 @@ static func _default_difficulty_progress() -> Dictionary:
 	for difficulty_id: String in DifficultyData.get_difficulty_ids():
 		progress[difficulty_id] = 0
 	return progress
+
+static func _normalize_paid_act_bosses(source: Dictionary) -> Dictionary:
+	var result: Dictionary = {}
+	for raw_key: Variant in source.keys():
+		var key: String = str(raw_key)
+		if key.contains(":") and bool(source[raw_key]):
+			result[key] = true
+	return result
 
 static func _normalize_difficulty_list(source: Variant) -> Array:
 	var result: Array = []

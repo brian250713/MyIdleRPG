@@ -11,6 +11,9 @@ static func create_state() -> Dictionary:
 	return {
 		"queue": [],
 		"white_cooldown": 0.0,
+		"capacity": WHITE_QUEUE_CAPACITY,
+		"white_drop_chance": WHITE_DROP_CHANCE,
+		"boss_chest_quality_bonus": 0.0,
 		"auto_open": {
 			"white": false,
 			"blue": false,
@@ -21,6 +24,9 @@ static func create_state() -> Dictionary:
 static func normalize_state(source: Dictionary) -> Dictionary:
 	var normalized: Dictionary = create_state()
 	normalized["white_cooldown"] = maxf(0.0, float(source.get("white_cooldown", 0.0)))
+	normalized["capacity"] = maxi(WHITE_QUEUE_CAPACITY, int(source.get("capacity", WHITE_QUEUE_CAPACITY)))
+	normalized["white_drop_chance"] = clampf(float(source.get("white_drop_chance", WHITE_DROP_CHANCE)), 0.0, 1.0)
+	normalized["boss_chest_quality_bonus"] = maxf(0.0, float(source.get("boss_chest_quality_bonus", 0.0)))
 	var source_queue: Variant = source.get("queue", [])
 	if source_queue is Array:
 		var queue: Array = []
@@ -60,6 +66,21 @@ static func get_queue_size(state: Dictionary) -> int:
 	var queue: Array = state.get("queue", [])
 	return queue.size()
 
+static func get_queue_capacity(state: Dictionary) -> int:
+	return maxi(WHITE_QUEUE_CAPACITY, int(state.get("capacity", WHITE_QUEUE_CAPACITY)))
+
+static func get_white_drop_chance(state: Dictionary) -> float:
+	return clampf(float(state.get("white_drop_chance", WHITE_DROP_CHANCE)), 0.0, 1.0)
+
+static func get_boss_chest_quality_bonus(state: Dictionary) -> float:
+	return maxf(0.0, float(state.get("boss_chest_quality_bonus", 0.0)))
+
+static func set_rune_effects(state: Dictionary, white_chest_rate: float, chest_capacity: int, boss_chest_quality: float) -> Dictionary:
+	state["white_drop_chance"] = clampf(white_chest_rate, 0.0, 1.0)
+	state["capacity"] = maxi(WHITE_QUEUE_CAPACITY, chest_capacity)
+	state["boss_chest_quality_bonus"] = maxf(0.0, boss_chest_quality)
+	return state
+
 static func get_counts(state: Dictionary) -> Dictionary:
 	var counts: Dictionary = {"white": 0, "blue": 0, "act_boss": 0}
 	var queue: Array = state.get("queue", [])
@@ -94,9 +115,9 @@ static func try_drop_for_kill(state: Dictionary, monster_level: int, is_stage_bo
 static func try_white_drop(state: Dictionary, monster_level: int, rng: RandomNumberGenerator) -> Dictionary:
 	if float(state.get("white_cooldown", 0.0)) > 0.0:
 		return {"dropped": false, "chests": [], "reason": "cooldown"}
-	if get_queue_size(state) >= WHITE_QUEUE_CAPACITY:
+	if get_queue_size(state) >= get_queue_capacity(state):
 		return {"dropped": false, "chests": [], "reason": "queue_full"}
-	if rng.randf() >= WHITE_DROP_CHANCE:
+	if rng.randf() >= get_white_drop_chance(state):
 		return {"dropped": false, "chests": [], "reason": "roll_failed"}
 	var result: Dictionary = drop_chest(state, "white", monster_level)
 	state["white_cooldown"] = WHITE_COOLDOWN_SECONDS
@@ -117,14 +138,19 @@ static func drop_chest(state: Dictionary, chest_type: String, item_level: int) -
 static func open_chest(state: Dictionary, queue_index: int, rng: RandomNumberGenerator) -> Dictionary:
 	var queue: Array = state.get("queue", [])
 	if queue_index < 0 or queue_index >= queue.size() or not (queue[queue_index] is Dictionary):
-		return {"opened": false, "reason": "invalid_index", "items": [], "gold": 0, "soul_stones": 0}
+		return {"opened": false, "reason": "invalid_index", "items": [], "materials": [], "gold": 0, "soul_stones": 0}
 	var chest: Dictionary = queue[queue_index]
 	queue.remove_at(queue_index)
 	state["queue"] = queue
 	var chest_type: String = str(chest.get("type", "white"))
 	var level: int = maxi(1, int(chest.get("level", 1)))
 	var item_count: int = rng.randi_range(1, 3)
-	var items: Array[Dictionary] = ItemGen.generate_items(level, item_count, rng)
+	var quality_bonus: float = get_boss_chest_quality_bonus(state) if chest_type != "white" else 0.0
+	var items: Array[Dictionary] = ItemGen.generate_items(level, item_count, rng, "", quality_bonus)
+	var materials: Array[Dictionary] = []
+	var material: Dictionary = Materials.roll_material_drop(chest_type, level, rng)
+	if not material.is_empty():
+		materials.append(material)
 	var gold: int = rng.randi_range(3, 10) + level * 2
 	var soul_stones: int = 0
 	if chest_type == "blue" and rng.randf() < BLUE_SOUL_STONE_CHANCE:
@@ -137,7 +163,9 @@ static func open_chest(state: Dictionary, queue_index: int, rng: RandomNumberGen
 		"opened": true,
 		"chest": chest.duplicate(true),
 		"items": items,
+		"materials": materials,
 		"gold": gold,
 		"soul_stones": soul_stones,
+		"quality_bonus": quality_bonus,
 		"reason": chest_type
 	}

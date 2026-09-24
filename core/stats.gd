@@ -13,7 +13,7 @@ static func calculate_monster_stats(monster_id: String, level: int, difficulty_i
 	var scaled: Dictionary = MonsterScaling.scale_monster(monster_id, level, difficulty_id)
 	return scaled.get("stats", {})
 
-static func calculate_final_stats(class_id: String, level: int, equipment: Dictionary = {}, skill_state: Dictionary = {}) -> Dictionary:
+static func calculate_final_stats(class_id: String, level: int, equipment: Dictionary = {}, skill_state: Dictionary = {}, rune_state: Dictionary = {}) -> Dictionary:
 	var base_stats: Dictionary = calculate_class_stats(class_id, level)
 	if base_stats.is_empty():
 		return {}
@@ -36,6 +36,10 @@ static func calculate_final_stats(class_id: String, level: int, equipment: Dicti
 				continue
 			var affix: Dictionary = affix_value
 			_add_stat(str(affix.get("stat", "max_hp")), float(affix.get("value", 0.0)), flat_adds, percent_adds)
+		var socket_bonus: Dictionary = Socketing.get_socketed_bonus(item)
+		for raw_socket_stat: Variant in socket_bonus.keys():
+			var socket_stat: String = str(raw_socket_stat)
+			_add_stat(socket_stat, float(socket_bonus[raw_socket_stat]), flat_adds, percent_adds)
 	for raw_skill_stat: Variant in skill_modifiers.keys():
 		var skill_stat: String = str(raw_skill_stat)
 		var skill_value: float = float(skill_modifiers[raw_skill_stat])
@@ -48,6 +52,13 @@ static func calculate_final_stats(class_id: String, level: int, equipment: Dicti
 			percent_adds[skill_stat] = float(percent_adds.get(skill_stat, 0.0)) + skill_value
 		else:
 			_add_stat(skill_stat, skill_value, flat_adds, percent_adds)
+	var rune_modifiers: Dictionary = Runes.get_modifiers(rune_state)
+	percent_adds["attack_percent"] = float(percent_adds.get("attack_percent", 0.0)) + float(rune_modifiers.get("party_attack", 0.0))
+	percent_adds["max_hp_percent"] = float(percent_adds.get("max_hp_percent", 0.0)) + float(rune_modifiers.get("party_hp", 0.0))
+	percent_adds["gold_gain"] = float(percent_adds.get("gold_gain", 0.0)) + float(rune_modifiers.get("gold_gain", 0.0))
+	percent_adds["xp_gain"] = float(percent_adds.get("xp_gain", 0.0)) + float(rune_modifiers.get("xp_gain", 0.0))
+	for resistance_key: String in ["fire_resistance", "ice_resistance", "lightning_resistance", "chaos_resistance"]:
+		percent_adds[resistance_key] = float(percent_adds.get(resistance_key, 0.0)) + float(rune_modifiers.get("all_resistance", 0.0))
 
 	var attack: float = float(final_stats.get("attack", 0.0)) + float(flat_adds.get("attack", 0.0))
 	attack *= 1.0 + float(percent_adds.get("attack_percent", 0.0))
@@ -75,6 +86,7 @@ static func calculate_final_stats(class_id: String, level: int, equipment: Dicti
 	final_stats["cooldown_reduction"] = clampf(float(percent_adds.get("cooldown_reduction", 0.0)), 0.0, 0.75)
 	final_stats["effect_radius_percent"] = maxf(0.0, float(percent_adds.get("effect_radius_percent", 0.0)))
 	final_stats["elemental_damage_percent"] = maxf(0.0, float(percent_adds.get("elemental_damage_percent", 0.0)))
+	final_stats["skill_level_bonus"] = maxf(0.0, float(flat_adds.get("skill_level_bonus", 0.0)))
 	final_stats["level"] = clampi(level, 1, MAX_LEVEL)
 	return final_stats
 
@@ -89,7 +101,10 @@ static func get_stat(stat_name: String, class_id: String, level: int) -> float:
 	return float(stats.get(stat_name, 0.0))
 
 static func _add_stat(stat_id: String, value: float, flat_adds: Dictionary, percent_adds: Dictionary) -> void:
-	if stat_id == "attack_percent" or stat_id == "attack_speed_percent" or stat_id == "crit_chance" or stat_id == "crit_damage" or stat_id.ends_with("_resistance") or stat_id == "life_steal" or stat_id == "gold_gain" or stat_id == "xp_gain":
+	if stat_id == "all_resistance":
+		for resistance_key: String in ["fire_resistance", "ice_resistance", "lightning_resistance", "chaos_resistance"]:
+			percent_adds[resistance_key] = float(percent_adds.get(resistance_key, 0.0)) + value
+	elif stat_id == "attack_percent" or stat_id == "attack_speed_percent" or stat_id == "crit_chance" or stat_id == "crit_damage" or stat_id.ends_with("_resistance") or stat_id == "life_steal" or stat_id == "gold_gain" or stat_id == "xp_gain":
 		percent_adds[stat_id] = float(percent_adds.get(stat_id, 0.0)) + value
 	else:
 		flat_adds[stat_id] = float(flat_adds.get(stat_id, 0.0)) + value

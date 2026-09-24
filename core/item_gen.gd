@@ -12,9 +12,11 @@ static func roll_rarity(rng: RandomNumberGenerator) -> String:
 			return rarity_id
 	return "transcendent"
 
-static func generate_item(item_level: int, rng: RandomNumberGenerator, forced_rarity: String = "", class_id: String = "", forced_slot: String = "") -> Dictionary:
+static func generate_item(item_level: int, rng: RandomNumberGenerator, forced_rarity: String = "", class_id: String = "", forced_slot: String = "", quality_bonus: float = 0.0) -> Dictionary:
 	var safe_level: int = clampi(item_level, 1, 100)
 	var rarity_id: String = forced_rarity if ItemData.get_rarity_definition(forced_rarity).size() > 0 else roll_rarity(rng)
+	if quality_bonus > 0.0 and rng.randf() < clampf(quality_bonus, 0.0, 1.0):
+		rarity_id = _upgrade_rarity(rarity_id)
 	var slot_id: String = forced_slot if ItemData.get_slot_ids().has(forced_slot) else str(ItemData.get_slot_ids()[rng.randi_range(0, ItemData.get_slot_ids().size() - 1)])
 	var subtype: String = ""
 	var classes: Array = []
@@ -51,10 +53,10 @@ static func generate_item(item_level: int, rng: RandomNumberGenerator, forced_ra
 	}
 	return item
 
-static func generate_items(item_level: int, count: int, rng: RandomNumberGenerator, class_id: String = "") -> Array[Dictionary]:
+static func generate_items(item_level: int, count: int, rng: RandomNumberGenerator, class_id: String = "", quality_bonus: float = 0.0) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for _index: int in range(maxi(0, count)):
-		result.append(generate_item(item_level, rng, "", class_id))
+		result.append(generate_item(item_level, rng, "", class_id, "", quality_bonus))
 	return result
 
 static func get_main_stat_for_slot(slot_id: String) -> String:
@@ -156,3 +158,10 @@ static func _make_item_name(slot_id: String, subtype: String, rarity_id: String)
 
 static func _sell_value(item_level: int, rarity_multiplier: float) -> int:
 	return maxi(1, int(round((5.0 + float(item_level) * 2.0) * rarity_multiplier)))
+
+static func _upgrade_rarity(rarity_id: String) -> String:
+	var rarity_ids: Array[String] = ItemData.get_rarity_ids()
+	var index: int = rarity_ids.find(rarity_id)
+	if index < 0 or index >= rarity_ids.size() - 1:
+		return rarity_id
+	return rarity_ids[index + 1]

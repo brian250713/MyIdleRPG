@@ -36,3 +36,7 @@ signal chest_changed
 signal difficulty_changed(difficulty_id: String)
 @warning_ignore("unused_signal")
 signal skills_changed(class_id: String)
+@warning_ignore("unused_signal")
+signal runes_changed
+@warning_ignore("unused_signal")
+signal offline_progress(summary: Dictionary)

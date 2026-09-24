@@ -136,6 +136,11 @@ func _update_stage_text() -> void:
 		return
 	var snapshot: Dictionary = _battlefield.get_snapshot()
 	var wave_text: String = "首領" if bool(snapshot.get("boss_active", false)) else "第 %d/%d 波" % [int(snapshot.get("wave_number", 1)), int(snapshot.get("wave_count", 5))]
+	var requirement: Dictionary = GameState.get_stage_requirement(int(snapshot.get("stage_index", GameState.get_current_stage())))
+	if bool(requirement.get("is_act_boss", false)) and not bool(requirement.get("can_enter", false)):
+		wave_text += " · 需要靈魂石"
+	elif bool(snapshot.get("needs_soul_stone", false)) or str(snapshot.get("status", "")).contains("需要靈魂石") or (GameState.get_soul_stones() <= 0 and GameState.get_current_stage() >= StageData.STAGES_PER_ACT - 2):
+		wave_text += " · 需要靈魂石"
 	_stage_label.text = "%s · %s" % [str(snapshot.get("stage_name", "普通 1-1")), wave_text]
 	_stage_label.tooltip_text = str(snapshot.get("status", ""))
 

@@ -3,20 +3,39 @@ extends RefCounted
 
 const PAGE_COUNT: int = 1
 const SLOT_COUNT: int = 40
+const MAX_PAGES: int = 5
 
-static func create_inventory() -> Dictionary:
+static func create_inventory(page_count: int = PAGE_COUNT) -> Dictionary:
+	var safe_pages: int = clampi(page_count, PAGE_COUNT, MAX_PAGES)
 	var slots: Array = []
-	for _index: int in range(SLOT_COUNT):
+	for _index: int in range(safe_pages * SLOT_COUNT):
 		slots.append(null)
-	return {"pages": PAGE_COUNT, "slots": slots}
+	return {"pages": safe_pages, "slots": slots}
+
+static func get_page_count(inventory: Dictionary) -> int:
+	return clampi(int(inventory.get("pages", PAGE_COUNT)), PAGE_COUNT, MAX_PAGES)
+
+static func get_capacity(inventory: Dictionary) -> int:
+	return get_page_count(inventory) * SLOT_COUNT
+
+static func ensure_pages(inventory: Dictionary, page_count: int) -> Dictionary:
+	var current_pages: int = get_page_count(inventory)
+	var safe_pages: int = maxi(current_pages, clampi(page_count, PAGE_COUNT, MAX_PAGES))
+	var slots: Array = inventory.get("slots", [])
+	while slots.size() < safe_pages * SLOT_COUNT:
+		slots.append(null)
+	inventory["pages"] = safe_pages
+	inventory["slots"] = slots
+	return inventory
 
 static func normalize_inventory(source: Dictionary) -> Dictionary:
-	var normalized: Dictionary = create_inventory()
+	var source_pages: int = clampi(int(source.get("pages", PAGE_COUNT)), PAGE_COUNT, MAX_PAGES)
+	var normalized: Dictionary = create_inventory(source_pages)
 	var source_slots: Variant = source.get("slots", [])
 	if source_slots is Array:
 		var source_array: Array = source_slots
 		var target_slots: Array = normalized["slots"]
-		for index: int in range(mini(SLOT_COUNT, source_array.size())):
+		for index: int in range(mini(target_slots.size(), source_array.size())):
 			var item_value: Variant = source_array[index]
 			if item_value is Dictionary:
 				target_slots[index] = (item_value as Dictionary).duplicate(true)
@@ -41,7 +60,7 @@ static func get_item_at(inventory: Dictionary, slot_index: int) -> Dictionary:
 
 static func find_empty_slot(inventory: Dictionary) -> int:
 	var slots: Array = inventory.get("slots", [])
-	for index: int in range(mini(SLOT_COUNT, slots.size())):
+	for index: int in range(slots.size()):
 		if slots[index] == null:
 			return index
 	return -1
@@ -79,7 +98,7 @@ static func sell_by_rarity(inventory: Dictionary, rarity: String) -> Dictionary:
 	var slots: Array = inventory.get("slots", [])
 	var sold_count: int = 0
 	var gold: int = 0
-	for index: int in range(mini(SLOT_COUNT, slots.size())):
+	for index: int in range(slots.size()):
 		var item_value: Variant = slots[index]
 		if item_value is Dictionary and str(item_value.get("rarity", "")) == rarity:
 			gold += int(item_value.get("sell_value", 0))

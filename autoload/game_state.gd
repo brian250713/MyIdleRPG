@@ -9,6 +9,7 @@ signal setting_changed(key: String, value: Variant)
 
 var state: Dictionary = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _offline_summary: Dictionary = {}
 
 func _ready() -> void:
 	state = SaveCodec.make_default_state()
@@ -20,6 +21,8 @@ func _process(delta: float) -> void:
 
 func apply_loaded_state(loaded_state: Dictionary) -> void:
 	state = SaveCodec.normalize_state(loaded_state)
+	_offline_summary = {}
+	_sync_rune_effects()
 	_notify_state_changed()
 	gold_changed.emit(get_gold())
 	EventBus.gold_changed.emit(get_gold())
@@ -145,7 +148,7 @@ func get_hero_level(class_id: String) -> int:
 
 func get_hero_stats(class_id: String) -> Dictionary:
 	var hero: Dictionary = get_hero(class_id)
-	return Stats.calculate_final_stats(class_id, int(hero.get("level", 1)), get_equipment(class_id), get_skill_state(class_id))
+	return Stats.calculate_final_stats(class_id, int(hero.get("level", 1)), get_equipment(class_id), get_skill_state(class_id), get_rune_state())
 
 func get_hero_power(class_id: String) -> int:
 	return Power.calculate(get_hero_stats(class_id))
@@ -280,7 +283,10 @@ func grant_monster_rewards(monster_level: int, is_boss: bool = false) -> Diction
 	return {"gold": granted_gold, "xp": total_xp, "is_boss": is_boss}
 
 func get_inventory() -> Dictionary:
-	return (state.get("inventory", Inventory.create_inventory()) as Dictionary).duplicate(true)
+	var inventory: Dictionary = state.get("inventory", Inventory.create_inventory()) as Dictionary
+	Inventory.ensure_pages(inventory, Runes.get_inventory_pages(get_rune_state()))
+	state["inventory"] = inventory
+	return inventory.duplicate(true)
 
 func get_inventory_item(slot_index: int) -> Dictionary:
 	return Inventory.get_item_at(get_inventory(), slot_index)
@@ -365,13 +371,230 @@ func sell_items_by_rarity(rarity: String) -> Dictionary:
 	return result
 
 func get_chest_state() -> Dictionary:
-	return (state.get("chests", Chests.create_state()) as Dictionary).duplicate(true)
+	var chest_state: Dictionary = state.get("chests", Chests.create_state()) as Dictionary
+	Chests.set_rune_effects(chest_state, Runes.get_white_chest_rate(get_rune_state()), Runes.get_chest_capacity(get_rune_state()), Runes.get_boss_chest_quality(get_rune_state()))
+	state["chests"] = chest_state
+	return chest_state.duplicate(true)
 
 func get_chest_counts() -> Dictionary:
 	return Chests.get_counts(get_chest_state())
 
 func get_soul_stones() -> int:
 	return maxi(0, int(state.get("soul_stones", 0)))
+
+func get_materials() -> Dictionary:
+	return Materials.normalize_state(state.get("materials", Materials.create_state()))
+
+func get_material_count(material_id: String) -> int:
+	return Materials.get_count(get_materials(), material_id)
+
+func add_material(material: Variant, count: int = 1) -> Dictionary:
+	var materials: Dictionary = get_materials()
+	var result: Dictionary = Materials.add_material(materials, material, count)
+	state["materials"] = materials
+	if bool(result.get("ok", false)):
+		_notify_state_changed()
+		EventBus.inventory_changed.emit()
+	return result
+
+func socket_inventory_material(inventory_index: int, socket_index: int, material_id: String) -> Dictionary:
+	var inventory: Dictionary = get_inventory()
+	var item: Dictionary = Inventory.get_item_at(inventory, inventory_index)
+	if item.is_empty():
+		return {"ok": false, "reason": "missing_item"}
+	var materials: Dictionary = get_materials()
+	if Materials.get_count(materials, material_id) <= 0:
+		return {"ok": false, "reason": "missing_material"}
+	var result: Dictionary = Socketing.socket_material(item, socket_index, Materials.get_stack(materials, material_id))
+	if not bool(result.get("ok", false)):
+		return result
+	var removed: Dictionary = Materials.remove_material(materials, material_id, 1)
+	if not bool(removed.get("ok", false)):
+		return {"ok": false, "reason": "missing_material"}
+	var slots: Array = inventory.get("slots", [])
+	slots[inventory_index] = result.get("item", item)
+	state["inventory"] = inventory
+	state["materials"] = materials
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	return {"ok": true, "item": result.get("item", {}), "material_id": material_id, "reason": "socketed"}
+
+func unsocket_inventory_material(inventory_index: int, socket_index: int) -> Dictionary:
+	var inventory: Dictionary = get_inventory()
+	var item: Dictionary = Inventory.get_item_at(inventory, inventory_index)
+	if item.is_empty():
+		return {"ok": false, "reason": "missing_item"}
+	var result: Dictionary = Socketing.unsocket_material(item, socket_index)
+	if not bool(result.get("ok", false)):
+		return result
+	var materials: Dictionary = get_materials()
+	Materials.add_material(materials, result.get("material", {}))
+	var slots: Array = inventory.get("slots", [])
+	slots[inventory_index] = result.get("item", item)
+	state["inventory"] = inventory
+	state["materials"] = materials
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	return {"ok": true, "item": result.get("item", {}), "material": result.get("material", {}), "reason": "unsocketed"}
+
+func socket_equipment_material(class_id: String, slot_id: String, socket_index: int, material_id: String) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	var equipment: Dictionary = get_equipment(class_id)
+	var item_value: Variant = equipment.get(slot_id, null)
+	if hero.is_empty() or not (item_value is Dictionary):
+		return {"ok": false, "reason": "missing_item"}
+	var materials: Dictionary = get_materials()
+	if Materials.get_count(materials, material_id) <= 0:
+		return {"ok": false, "reason": "missing_material"}
+	var result: Dictionary = Socketing.socket_material(item_value as Dictionary, socket_index, Materials.get_stack(materials, material_id))
+	if not bool(result.get("ok", false)):
+		return result
+	if not bool(Materials.remove_material(materials, material_id, 1).get("ok", false)):
+		return {"ok": false, "reason": "missing_material"}
+	equipment[slot_id] = result.get("item", {})
+	hero["equipment"] = equipment
+	_update_party_hero(hero)
+	state["materials"] = materials
+	_notify_state_changed()
+	EventBus.equipment_changed.emit(class_id)
+	return result
+
+func unsocket_equipment_material(class_id: String, slot_id: String, socket_index: int) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	var equipment: Dictionary = get_equipment(class_id)
+	var item_value: Variant = equipment.get(slot_id, null)
+	if hero.is_empty() or not (item_value is Dictionary):
+		return {"ok": false, "reason": "missing_item"}
+	var result: Dictionary = Socketing.unsocket_material(item_value as Dictionary, socket_index)
+	if not bool(result.get("ok", false)):
+		return result
+	equipment[slot_id] = result.get("item", {})
+	hero["equipment"] = equipment
+	_update_party_hero(hero)
+	var materials: Dictionary = get_materials()
+	Materials.add_material(materials, result.get("material", {}))
+	state["materials"] = materials
+	_notify_state_changed()
+	EventBus.equipment_changed.emit(class_id)
+	return result
+
+func get_cube_state() -> Dictionary:
+	return Cube.normalize_state(state.get("cube", Cube.create_state()))
+
+func get_cube_preview(items: Array) -> Dictionary:
+	return Cube.preview(get_cube_state(), items, _rng)
+
+func combine_cube_items(inventory_indices: Array) -> Dictionary:
+	var inventory: Dictionary = get_inventory()
+	var unique_indices: Array[int] = []
+	var items: Array = []
+	for raw_index: Variant in inventory_indices:
+		var index: int = int(raw_index)
+		if unique_indices.has(index):
+			continue
+		unique_indices.append(index)
+		var item: Dictionary = Inventory.get_item_at(inventory, index)
+		if not item.is_empty():
+			items.append(item)
+	var result: Dictionary = Cube.combine_items(get_cube_state(), items, _rng)
+	if not bool(result.get("ok", false)):
+		return result
+	for index: int in unique_indices:
+		var slots: Array = inventory.get("slots", [])
+		if index >= 0 and index < slots.size():
+			slots[index] = null
+	var add_result: Dictionary = Inventory.add_item(inventory, result.get("item", {}), bool(get_setting("auto_sell_common", false)), bool(get_setting("auto_sell_uncommon", false)))
+	state["inventory"] = inventory
+	state["cube"] = result.get("state", get_cube_state())
+	if bool(add_result.get("converted_to_gold", false)):
+		add_gold(int(add_result.get("gold", 0)))
+	elif not bool(add_result.get("stored", false)):
+		return {"ok": false, "reason": "output_inventory_full", "state": result.get("state", {}), "item": {}}
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+	return result
+
+func combine_cube_material(material_id: String) -> Dictionary:
+	var materials: Dictionary = get_materials()
+	var result: Dictionary = Cube.combine_materials(materials, get_cube_state(), material_id, _rng)
+	if bool(result.get("ok", false)):
+		state["materials"] = result.get("state", materials)
+		_notify_state_changed()
+		EventBus.inventory_changed.emit()
+	return result
+
+func get_rune_state() -> Dictionary:
+	return Runes.normalize_state(state.get("runes", Runes.create_state()))
+
+func get_rune_level(rune_id: String) -> int:
+	return Runes.get_level(get_rune_state(), rune_id)
+
+func get_rune_modifiers() -> Dictionary:
+	return Runes.get_modifiers(get_rune_state())
+
+func get_inventory_page_count() -> int:
+	return Runes.get_inventory_pages(get_rune_state())
+
+func purchase_rune(rune_id: String) -> Dictionary:
+	var result: Dictionary = Runes.purchase(get_rune_state(), rune_id, get_gold())
+	if not bool(result.get("ok", false)):
+		return result
+	var cost: int = int(result.get("cost", 0))
+	state["runes"] = result.get("state", get_rune_state())
+	add_gold(-cost)
+	_sync_rune_effects()
+	_notify_state_changed()
+	EventBus.runes_changed.emit()
+	return result
+
+func get_stage_requirement(stage_index: int) -> Dictionary:
+	var difficulty_id: String = get_current_difficulty()
+	var is_act_boss: bool = SoulStones.is_act_boss_stage(stage_index)
+	var text: String = SoulStones.get_requirement_text(state, difficulty_id, stage_index)
+	return {"is_act_boss": is_act_boss, "can_enter": is_act_boss == false or SoulStones.can_pay(state, difficulty_id, stage_index), "text": text, "fallback_stage": SoulStones.get_fallback_stage(stage_index)}
+
+func admit_stage(stage_index: int) -> Dictionary:
+	var requirement: Dictionary = get_stage_requirement(stage_index)
+	if not bool(requirement.get("can_enter", false)):
+		return {"ok": false, "reason": "needs_soul_stone", "fallback_stage": int(requirement.get("fallback_stage", stage_index)), "text": "需要靈魂石"}
+	var payment: Dictionary = SoulStones.pay_for_stage(state, get_current_difficulty(), stage_index)
+	if not bool(payment.get("ok", false)):
+		return {"ok": false, "reason": "needs_soul_stone", "fallback_stage": int(requirement.get("fallback_stage", stage_index)), "text": "需要靈魂石"}
+	state = payment.get("state", state)
+	_sync_rune_effects()
+	_notify_state_changed()
+	return {"ok": true, "paid": bool(payment.get("paid", false)), "already_paid": bool(payment.get("already_paid", false)), "text": str(requirement.get("text", ""))}
+
+func mark_act_boss_cleared(stage_index: int) -> void:
+	state = SoulStones.clear_paid(state, get_current_difficulty(), stage_index)
+	_notify_state_changed()
+
+func get_offline_summary() -> Dictionary:
+	return _offline_summary.duplicate(true)
+
+func apply_offline_progress(summary: Dictionary) -> Dictionary:
+	state = Offline.apply_to_state(state, summary)
+	_offline_summary = summary.duplicate(true)
+	_sync_rune_effects()
+	_notify_state_changed()
+	EventBus.offline_progress.emit(_offline_summary)
+	return state
+
+func debug_apply_offline_preview(seconds_ago: int) -> Dictionary:
+	var now: int = int(Time.get_unix_time_from_system())
+	state["last_saved_unix"] = maxi(0, now - maxi(0, seconds_ago))
+	var summary: Dictionary = Offline.calculate(state, now)
+	apply_offline_progress(summary)
+	return summary
+
+func _sync_rune_effects() -> void:
+	var rune_state: Dictionary = get_rune_state()
+	var inventory: Dictionary = state.get("inventory", Inventory.create_inventory()) as Dictionary
+	Inventory.ensure_pages(inventory, Runes.get_inventory_pages(rune_state))
+	state["inventory"] = inventory
+	var chest_state: Dictionary = state.get("chests", Chests.create_state()) as Dictionary
+	Chests.set_rune_effects(chest_state, Runes.get_white_chest_rate(rune_state), Runes.get_chest_capacity(rune_state), Runes.get_boss_chest_quality(rune_state))
+	state["chests"] = chest_state
 
 func set_auto_open(chest_type: String, enabled: bool) -> void:
 	var chests: Dictionary = get_chest_state()
@@ -405,6 +628,10 @@ func open_chest(queue_index: int) -> Dictionary:
 	for item_value: Variant in items:
 		if item_value is Dictionary:
 			add_item(item_value)
+	var materials: Array = result.get("materials", [])
+	for material_value: Variant in materials:
+		if material_value is Dictionary:
+			add_material(material_value)
 	if int(result.get("gold", 0)) > 0:
 		add_gold(int(result.get("gold", 0)))
 	if int(result.get("soul_stones", 0)) > 0:
@@ -476,6 +703,59 @@ func seed_debug_loot() -> void:
 	_notify_state_changed()
 	EventBus.inventory_changed.emit()
 	EventBus.chest_changed.emit()
+
+func seed_debug_cube() -> void:
+	var debug_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	debug_rng.seed = 424243
+	var inventory: Dictionary = get_inventory()
+	for index: int in range(3):
+		Inventory.add_item(inventory, ItemGen.generate_item(8 + index, debug_rng, "rare", "knight", "weapon"))
+	state["inventory"] = inventory
+	var materials: Dictionary = get_materials()
+	Materials.add_material(materials, Materials.make_material("strength_rune", 8), 3)
+	state["materials"] = materials
+	state["cube"] = Cube.create_state()
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+
+func seed_debug_sockets() -> void:
+	var debug_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	debug_rng.seed = 424244
+	state["inventory"] = Inventory.create_inventory()
+	var item: Dictionary = ItemGen.generate_item(12, debug_rng, "rare", "knight", "weapon")
+	var materials: Dictionary = Materials.create_state()
+	var material: Dictionary = Materials.make_material("ruby", 12, "rare")
+	Materials.add_material(materials, material, 3)
+	var socket_result: Dictionary = Socketing.socket_material(item, 0, material)
+	if bool(socket_result.get("ok", false)):
+		Materials.remove_material(materials, "ruby", 1)
+		var inventory: Dictionary = get_inventory()
+		var slots: Array = inventory.get("slots", [])
+		slots[0] = socket_result.get("item", item)
+		inventory["slots"] = slots
+		state["inventory"] = inventory
+	state["materials"] = materials
+	_notify_state_changed()
+	EventBus.inventory_changed.emit()
+
+func seed_debug_act_boss() -> void:
+	state["difficulty"] = "normal"
+	state["current_stage"] = 9
+	state["unlocked_stage"] = 9
+	state["difficulty_progress"] = {"normal": 9, "nightmare": 0, "hell": 0, "torture": 0}
+	state["soul_stones"] = 0
+	state["paid_act_bosses"] = {}
+	_notify_state_changed()
+
+func seed_debug_runes() -> void:
+	var levels: Dictionary = {}
+	for rune_id: String in RuneData.get_rune_ids():
+		levels[rune_id] = 2
+	state["runes"] = Runes.normalize_state({"levels": levels})
+	state["gold"] = maxi(get_gold(), 5000)
+	_sync_rune_effects()
+	_notify_state_changed()
+	EventBus.runes_changed.emit()
 
 func seed_debug_skills() -> void:
 	var hero: Dictionary = get_hero("knight")

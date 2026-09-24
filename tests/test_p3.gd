@@ -119,7 +119,7 @@ func test_v2_to_v3_save_migration() -> bool:
 	var hero: Dictionary = (migrated["party"] as Array)[0]
 	var skills: Dictionary = hero.get("skills", {})
 	var progress: Dictionary = migrated.get("difficulty_progress", {})
-	return int(migrated["version"]) == 3 and str(migrated["difficulty"]) == "normal" and int(progress["normal"]) == 7 and int(skills["skill_levels"]["knight_shield_bash"]) == 2 and (skills["equipped_actives"] as Array).size() == 2
+	return int(migrated["version"]) == SaveCodec.VERSION and str(migrated["difficulty"]) == "normal" and int(progress["normal"]) == 7 and int(skills["skill_levels"]["knight_shield_bash"]) == 2 and (skills["equipped_actives"] as Array).size() == 2
 
 func test_v3_save_round_trip_includes_skills_and_difficulty() -> bool:
 	var state: Dictionary = SaveCodec.make_default_state()
@@ -132,7 +132,7 @@ func test_v3_save_round_trip_includes_skills_and_difficulty() -> bool:
 	var decoded: Dictionary = SaveCodec.state_from_json(SaveCodec.state_to_json(state))
 	var hero: Dictionary = (decoded["party"] as Array)[0]
 	var skills: Dictionary = hero.get("skills", {})
-	return int(decoded["version"]) == 3 and str(decoded["difficulty"]) == "nightmare" and int((decoded["difficulty_progress"] as Dictionary)["nightmare"]) == 4 and int((skills["skill_levels"] as Dictionary)["knight_shield_bash"]) == 2 and (skills["equipped_actives"] as Array).size() == 1
+	return int(decoded["version"]) == SaveCodec.VERSION and str(decoded["difficulty"]) == "nightmare" and int((decoded["difficulty_progress"] as Dictionary)["nightmare"]) == 4 and int((skills["skill_levels"] as Dictionary)["knight_shield_bash"]) == 2 and (skills["equipped_actives"] as Array).size() == 1
 
 func _effect_result_is_valid(effect_type: String, result: Dictionary) -> bool:
 	var hits: Array = result.get("hits", [])

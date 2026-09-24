@@ -3,6 +3,8 @@ extends SceneTree
 const DEFAULT_WAIT_SECONDS: float = 10.0
 
 func _init() -> void:
+	OS.set_environment("CAPTURE_MODE", "1")
+	OS.set_environment("MYIDLE_SAVE_PATH", "user://capture_save.json")
 	call_deferred("_run_capture")
 
 func _run_capture() -> void:
@@ -13,6 +15,8 @@ func _run_capture() -> void:
 	var expanded: bool = OS.get_environment("CAP_EXPANDED") == "1"
 	var game_state: Node = root.get_node("GameState")
 	var window_manager: Node = root.get_node("WindowManager")
+	if OS.get_environment("CAP_DEBUG_ACT_BOSS") == "1":
+		game_state.call("seed_debug_act_boss")
 	game_state.call("set_setting", "expanded", expanded)
 	window_manager.call("set_expanded", expanded)
 	window_manager.call("apply_window_mode")
@@ -28,6 +32,16 @@ func _run_capture() -> void:
 	root.add_child(main_scene)
 	if OS.get_environment("CAP_DEBUG_LOOT") == "1":
 		game_state.call("seed_debug_loot")
+	if OS.get_environment("CAP_DEBUG_CUBE") == "1":
+		game_state.call("seed_debug_cube")
+	if OS.get_environment("CAP_DEBUG_SOCKETS") == "1":
+		game_state.call("seed_debug_sockets")
+	if OS.get_environment("CAP_DEBUG_RUNES") == "1":
+		game_state.call("seed_debug_runes")
+	var offline_fake: String = OS.get_environment("CAP_OFFLINE_SECONDS")
+	if not offline_fake.is_empty():
+		var offline_summary: Dictionary = game_state.call("debug_apply_offline_preview", offline_fake.to_int()) as Dictionary
+		main_scene.call("show_offline_summary", offline_summary)
 	var selected_tab: String = OS.get_environment("CAP_TAB")
 	if not selected_tab.is_empty():
 		var expanded_panel: Node = main_scene.get_node("Layout/ExpandedPanel")
@@ -35,6 +49,12 @@ func _run_capture() -> void:
 		var selected_item_text: String = OS.get_environment("CAP_SELECT_ITEM")
 		if not selected_item_text.is_empty():
 			expanded_panel.call("select_inventory_slot", selected_item_text.to_int())
+		var cube_slots_text: String = OS.get_environment("CAP_CUBE_SLOTS")
+		if not cube_slots_text.is_empty():
+			var cube_slots: Array[int] = []
+			for raw_slot: String in cube_slots_text.split(",", false):
+				cube_slots.append(raw_slot.strip_edges().to_int())
+			expanded_panel.call("select_cube_slots", cube_slots)
 	await process_frame
 	await _wait_for_seconds(wait_seconds)
 	await process_frame

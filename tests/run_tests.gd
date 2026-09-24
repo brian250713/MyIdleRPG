@@ -3,11 +3,14 @@ extends SceneTree
 ## 每個案例在獨立程序執行；即使案例陷入無限迴圈，主測試器仍能在逾時後繼續。
 const TEST_TIMEOUT_MSEC: int = 10000
 const PROCESS_POLL_MSEC: int = 10
+const TEST_SAVE_PATH: String = "user://test_runner_save.json"
 
 var _failures: int = 0
 var _cases_run: int = 0
 
 func _init() -> void:
+	OS.set_environment("MYIDLE_TEST_MODE", "1")
+	OS.set_environment("MYIDLE_SAVE_PATH", TEST_SAVE_PATH)
 	call_deferred("_run_all")
 
 func _run_all() -> void:
@@ -43,7 +46,7 @@ func _run_isolated_case(file_name: String, method_name: String) -> void:
 		"--headless",
 		"--path", project_path,
 		"-s", "res://tests/test_worker.gd",
-		"--", "--file", "res://tests/%s" % file_name, "--method", method_name
+		"--", "--file", "res://tests/%s" % file_name, "--method", method_name, "--save-path", TEST_SAVE_PATH
 	])
 	var process_id: int = OS.create_process(executable, arguments, false)
 	if process_id <= 0:

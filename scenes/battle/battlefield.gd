@@ -32,6 +32,7 @@ var _retreat_timer: float = 0.0
 var _scroll_offset: float = 0.0
 var _rng: RandomNumberGenerator
 var _last_status: String = "準備出發"
+var _admission_status_override: String = ""
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -111,6 +112,7 @@ func get_snapshot() -> Dictionary:
 		"wave_number": wave_number,
 		"wave_count": wave_count,
 		"boss_active": boss_active,
+		"needs_soul_stone": _admission_status_override.contains("需要靈魂石"),
 		"status": _last_status,
 		"phase": _progression.get_phase_name() if _progression != null else "idle"
 	}
@@ -154,6 +156,12 @@ func _input(event: InputEvent) -> void:
 func _begin_stage(stage_index: int) -> void:
 	_clear_units()
 	_stage_index = clampi(stage_index, 0, StageData.get_stage_count() - 1)
+	var admission: Dictionary = GameState.admit_stage(_stage_index)
+	if not bool(admission.get("ok", false)):
+		_stage_index = clampi(int(admission.get("fallback_stage", SoulStones.get_fallback_stage(_stage_index))), 0, StageData.get_stage_count() - 1)
+		_admission_status_override = "需要靈魂石，已返回 %s" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
+	else:
+		_admission_status_override = ""
 	_stage_data = StageData.get_stage_by_index(_stage_index, GameState.get_current_difficulty())
 	var wave_count: int = maxi(1, int(_stage_data.get("wave_count", 5)))
 	_progression.start_stage(_stage_index, wave_count)
@@ -164,7 +172,7 @@ func _begin_stage(stage_index: int) -> void:
 	_wipe_handled = false
 	_stage_clear_timer = 0.0
 	_retreat_timer = 0.0
-	_last_status = "%s 出發" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
+	_last_status = _admission_status_override if not _admission_status_override.is_empty() else "%s 出發" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
 	GameState.set_current_stage(_stage_index)
 	_spawn_heroes()
 	_fully_heal_party()
@@ -607,6 +615,8 @@ func _check_stage_completion() -> void:
 			_boss_pending = false
 			_progression.on_boss_defeated()
 			GameState.unlock_stage(mini(StageData.get_stage_count() - 1, _stage_index + 1))
+			if bool(_stage_data.get("is_act_boss", false)):
+				GameState.mark_act_boss_cleared(_stage_index)
 			_last_status = "%s 已通關" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
 			stage_cleared.emit(_stage_index)
 			EventBus.stage_cleared.emit(_stage_index)

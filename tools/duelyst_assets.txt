@@ -1,4 +1,4 @@
-# 匯入 P1/P2 會使用的 Duelyst CC0 素材
+# 匯入 P1/P2/P3 會使用的 Duelyst CC0 素材
 # 格式：<spritesheets/spriteframes 類別>/<檔名（不含副檔名）>
 units/f1_general
 units/f1_altgeneral
@@ -29,3 +29,23 @@ icons/artifact_f1_sunstonebracers
 icons/artifact_f6_snowshovel
 icons/artifact_f4_darkstonering
 icons/artifact_f2_unboundedenergyamulet
+icons/icon_f1_aegisbarrier
+icons/generalspell_f1_roar
+icons/generalspell_f1_kingsguard
+icons/icon_f1_holyimmolation
+icons/icon_f1_blessing
+icons/icon_f1_lionheartblessing
+icons/bossspell_restoringlight
+icons/icon_f2_etherealblades
+icons/icon_f2_kagelightning
+icons/icon_f2_phoenixbarrage
+icons/icon_f6_lightningblitz
+icons/icon_f6_snowstorm
+icons/icon_f2_ghost_lightning
+icons/icon_f2_firestormofagony
+fx/fx_fireimpact
+fx/fx_chainlightning
+fx/fx_impactblue
+fx/fx_heal
+fx/fx_buff
+fx/fx_impact2

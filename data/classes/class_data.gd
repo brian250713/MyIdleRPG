@@ -15,10 +15,14 @@ static func get_class_definition(class_id: String) -> Dictionary:
 static func get_all_definitions() -> Dictionary:
 	return _get_definitions()
 
+static func get_default_element(class_id: String) -> String:
+	return str(get_class_definition(class_id).get("element", "physical"))
+
 static func _get_definitions() -> Dictionary:
 	return {
 		"knight": {
 			"name": "騎士",
+			"element": "physical",
 			"sprite": "f1_general",
 			"attack_type": "melee",
 			"range": 82.0,
@@ -53,6 +57,7 @@ static func _get_definitions() -> Dictionary:
 		},
 		"priest": {
 			"name": "牧師",
+			"element": "physical",
 			"sprite": "f1_altgeneral",
 			"attack_type": "melee",
 			"range": 76.0,
@@ -87,6 +92,7 @@ static func _get_definitions() -> Dictionary:
 		},
 		"ranger": {
 			"name": "遊俠",
+			"element": "physical",
 			"sprite": "f1_ranged",
 			"attack_type": "ranged",
 			"range": 245.0,
@@ -121,6 +127,7 @@ static func _get_definitions() -> Dictionary:
 		},
 		"mage": {
 			"name": "法師",
+			"element": "fire",
 			"sprite": "f2_caster",
 			"attack_type": "ranged",
 			"range": 265.0,

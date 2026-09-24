@@ -23,8 +23,8 @@ func apply_loaded_state(loaded_state: Dictionary) -> void:
 	_notify_state_changed()
 	gold_changed.emit(get_gold())
 	EventBus.gold_changed.emit(get_gold())
-	stage_changed.emit(get_current_stage(), StageData.get_display_name(get_current_stage()))
-	EventBus.stage_changed.emit(get_current_stage(), StageData.get_display_name(get_current_stage()))
+	stage_changed.emit(get_current_stage(), StageData.get_display_name(get_current_stage(), get_current_difficulty()))
+	EventBus.stage_changed.emit(get_current_stage(), StageData.get_display_name(get_current_stage(), get_current_difficulty()))
 
 func get_save_state() -> Dictionary:
 	return state.duplicate(true)
@@ -43,18 +43,67 @@ func get_current_stage() -> int:
 	return clampi(int(state.get("current_stage", 0)), 0, StageData.get_stage_count() - 1)
 
 func get_unlocked_stage() -> int:
-	return clampi(int(state.get("unlocked_stage", 0)), 0, StageData.get_stage_count() - 1)
+	var progress: Dictionary = state.get("difficulty_progress", {})
+	return clampi(int(progress.get(get_current_difficulty(), state.get("unlocked_stage", 0))), 0, StageData.get_stage_count() - 1)
 
 func set_current_stage(stage_index: int) -> void:
 	var safe_stage: int = clampi(stage_index, 0, get_unlocked_stage())
 	state["current_stage"] = safe_stage
-	stage_changed.emit(safe_stage, StageData.get_display_name(safe_stage))
-	EventBus.stage_changed.emit(safe_stage, StageData.get_display_name(safe_stage))
+	stage_changed.emit(safe_stage, StageData.get_display_name(safe_stage, get_current_difficulty()))
+	EventBus.stage_changed.emit(safe_stage, StageData.get_display_name(safe_stage, get_current_difficulty()))
 	_notify_state_changed()
 
 func unlock_stage(stage_index: int) -> void:
-	state["unlocked_stage"] = clampi(maxi(get_unlocked_stage(), stage_index), 0, StageData.get_stage_count() - 1)
+	var difficulty_id: String = get_current_difficulty()
+	var progress: Dictionary = state.get("difficulty_progress", {})
+	progress[difficulty_id] = clampi(maxi(int(progress.get(difficulty_id, 0)), stage_index), 0, StageData.get_stage_count() - 1)
+	state["difficulty_progress"] = progress
+	state["unlocked_stage"] = int(progress[difficulty_id])
+	if stage_index >= Difficulty.FINAL_STAGE_INDEX:
+		var unlocked: Array = Difficulty.unlock_after_stage(difficulty_id, stage_index, get_unlocked_difficulties())
+		state["unlocked_difficulties"] = unlocked
+		var cleared: Array = state.get("cleared_difficulties", [])
+		if not cleared.has(difficulty_id):
+			cleared.append(difficulty_id)
+		state["cleared_difficulties"] = cleared
 	_notify_state_changed()
+
+func get_current_difficulty() -> String:
+	var difficulty_id: String = str(state.get("difficulty", "normal"))
+	return difficulty_id if DifficultyData.get_difficulty_ids().has(difficulty_id) else "normal"
+
+func get_difficulty_definition(difficulty_id: String = "") -> Dictionary:
+	var safe_id: String = difficulty_id if not difficulty_id.is_empty() else get_current_difficulty()
+	return DifficultyData.get_difficulty_definition(safe_id)
+
+func get_unlocked_difficulties() -> Array:
+	var result: Array = []
+	var source: Variant = state.get("unlocked_difficulties", ["normal"])
+	if source is Array:
+		for raw_id: Variant in source:
+			var difficulty_id: String = str(raw_id)
+			if DifficultyData.get_difficulty_ids().has(difficulty_id) and not result.has(difficulty_id):
+				result.append(difficulty_id)
+	if not result.has("normal"):
+		result.append("normal")
+	return result
+
+func is_difficulty_unlocked(difficulty_id: String) -> bool:
+	return Difficulty.is_unlocked(difficulty_id, get_unlocked_difficulties())
+
+func set_difficulty(difficulty_id: String) -> bool:
+	if not is_difficulty_unlocked(difficulty_id):
+		return false
+	state["difficulty"] = difficulty_id
+	var progress: Dictionary = state.get("difficulty_progress", {})
+	state["current_stage"] = clampi(int(progress.get(difficulty_id, 0)), 0, StageData.get_stage_count() - 1)
+	state["unlocked_stage"] = int(progress.get(difficulty_id, 0))
+	var current_stage: int = get_current_stage()
+	stage_changed.emit(current_stage, StageData.get_display_name(current_stage, difficulty_id))
+	EventBus.stage_changed.emit(current_stage, StageData.get_display_name(current_stage, difficulty_id))
+	_notify_state_changed()
+	EventBus.difficulty_changed.emit(difficulty_id)
+	return true
 
 func get_setting(key: String, default_value: Variant = null) -> Variant:
 	var settings: Dictionary = state.get("settings", {})
@@ -96,7 +145,7 @@ func get_hero_level(class_id: String) -> int:
 
 func get_hero_stats(class_id: String) -> Dictionary:
 	var hero: Dictionary = get_hero(class_id)
-	return Stats.calculate_final_stats(class_id, int(hero.get("level", 1)), get_equipment(class_id))
+	return Stats.calculate_final_stats(class_id, int(hero.get("level", 1)), get_equipment(class_id), get_skill_state(class_id))
 
 func get_hero_power(class_id: String) -> int:
 	return Power.calculate(get_hero_stats(class_id))
@@ -107,6 +156,44 @@ func get_equipment(class_id: String) -> Dictionary:
 	if equipment_value is Dictionary:
 		return (equipment_value as Dictionary).duplicate(true)
 	return {}
+
+func get_skill_state(class_id: String) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	var skill_value: Variant = hero.get("skills", {})
+	return Skills.normalize_skill_state(skill_value if skill_value is Dictionary else {}, class_id)
+
+func get_skill_points(class_id: String) -> int:
+	var hero: Dictionary = get_hero(class_id)
+	return Skills.get_available_points(int(hero.get("level", 1)), get_skill_state(class_id))
+
+func upgrade_skill(class_id: String, skill_id: String, amount: int = 1) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	if hero.is_empty():
+		return {"ok": false, "reason": "missing_hero"}
+	var result: Dictionary = Skills.upgrade_skill(get_skill_state(class_id), int(hero.get("level", 1)), skill_id, amount)
+	if bool(result.get("ok", false)):
+		hero["skills"] = result["state"]
+		_update_party_hero(hero)
+		_notify_state_changed()
+		EventBus.equipment_changed.emit(class_id)
+		EventBus.skills_changed.emit(class_id)
+	return result
+
+func equip_active_skill(class_id: String, skill_id: String, slot_index: int) -> Dictionary:
+	var hero: Dictionary = get_hero(class_id)
+	if hero.is_empty():
+		return {"ok": false, "reason": "missing_hero"}
+	var result: Dictionary = Skills.equip_active_skill(get_skill_state(class_id), skill_id, slot_index)
+	if bool(result.get("ok", false)):
+		hero["skills"] = result["state"]
+		_update_party_hero(hero)
+		_notify_state_changed()
+		EventBus.equipment_changed.emit(class_id)
+		EventBus.skills_changed.emit(class_id)
+	return result
+
+func get_equipped_active_skills(class_id: String) -> Array[String]:
+	return Skills.get_equipped_active_ids(get_skill_state(class_id))
 
 func get_highest_party_level() -> int:
 	var highest: int = 1
@@ -339,7 +426,9 @@ func open_auto_chests() -> void:
 	var chests: Dictionary = get_chest_state()
 	var queue: Array[Dictionary] = Chests.get_queue(chests)
 	var opened_any: bool = true
-	while opened_any:
+	var attempts: int = 0
+	while opened_any and attempts < 256:
+		attempts += 1
 		opened_any = false
 		queue = Chests.get_queue(chests)
 		for index: int in range(queue.size()):
@@ -388,6 +477,28 @@ func seed_debug_loot() -> void:
 	EventBus.inventory_changed.emit()
 	EventBus.chest_changed.emit()
 
+func seed_debug_skills() -> void:
+	var hero: Dictionary = get_hero("knight")
+	if hero.is_empty():
+		return
+	hero["level"] = 5
+	var skill_state: Dictionary = Skills.make_skill_state("knight")
+	var skill_levels: Dictionary = skill_state["skill_levels"]
+	var active_ids: Array[String] = SkillData.get_active_skill_ids("knight")
+	var passive_ids: Array[String] = SkillData.get_passive_skill_ids("knight")
+	if not active_ids.is_empty():
+		skill_levels[active_ids[0]] = 2
+	if active_ids.size() > 1:
+		skill_levels[active_ids[1]] = 2
+	if not passive_ids.is_empty():
+		skill_levels[passive_ids[0]] = 1
+	skill_state["skill_levels"] = skill_levels
+	skill_state["equipped_actives"] = active_ids.slice(0, 2)
+	hero["skills"] = Skills.normalize_skill_state(skill_state, "knight")
+	_update_party_hero(hero)
+	_notify_state_changed()
+	EventBus.skills_changed.emit("knight")
+
 func set_last_saved_unix(unix_time: int) -> void:
 	state["last_saved_unix"] = maxi(0, unix_time)
 
@@ -405,7 +516,7 @@ func _make_hero_state(class_id: String) -> Dictionary:
 	var equipment: Dictionary = {}
 	for slot_id: String in ItemData.get_slot_ids():
 		equipment[slot_id] = null
-	return {"class_id": class_id, "level": 1, "xp": 0, "equipment": equipment}
+	return {"class_id": class_id, "level": 1, "xp": 0, "equipment": equipment, "skills": Skills.make_skill_state(class_id)}
 
 func _update_party_hero(hero: Dictionary) -> void:
 	var party: Array = get_party()

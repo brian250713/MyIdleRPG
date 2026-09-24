@@ -4,6 +4,7 @@ extends Node2D
 var target: BattleUnit
 var damage: int = 1
 var is_crit: bool = false
+var damage_element: String = "physical"
 var speed: float = 310.0
 var use_animation: bool = false
 var sprite_frames: SpriteFrames
@@ -21,11 +22,13 @@ func setup(
 	projectile_crit: bool,
 	frames: SpriteFrames,
 	animated: bool,
-	projectile_speed: float = 310.0
+	projectile_speed: float = 310.0,
+	element: String = "physical"
 ) -> void:
 	target = projectile_target
 	damage = maxi(1, projectile_damage)
 	is_crit = projectile_crit
+	damage_element = CombatMath.normalize_element(element)
 	sprite_frames = frames
 	use_animation = animated and frames != null and frames.has_animation("projectile")
 	speed = maxf(80.0, projectile_speed)
@@ -64,7 +67,7 @@ func _process(delta: float) -> void:
 	var direction: Vector2 = target_position - current_position
 	var distance: float = direction.length()
 	if distance <= 14.0:
-		target.take_damage(damage, is_crit)
+		target.take_damage(damage, is_crit, damage_element)
 		queue_free()
 		return
 	if direction.length_squared() > 0.001:

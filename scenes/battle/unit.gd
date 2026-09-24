@@ -2,7 +2,7 @@ class_name BattleUnit
 extends Node2D
 
 signal died(unit: BattleUnit)
-signal damaged(unit: BattleUnit, amount: int, is_crit: bool)
+signal damaged(unit: BattleUnit, amount: int, is_crit: bool, damage_element: String)
 
 @onready var _sprite: AnimatedSprite2D = $Sprite
 
@@ -19,8 +19,28 @@ var sprite_frames: SpriteFrames
 var current_hp: float = 1.0
 var max_hp: float = 1.0
 var attack_cooldown: float = 0.0
+var base_attack_speed: float = 1.0
 var facing: int = 1
+var class_id: String = ""
+var element: String = "physical"
+var skill_levels: Dictionary = {}
+var equipped_active_skills: Array[String] = []
+var skill_cooldowns: Dictionary = {}
+var skill_burst_multiplier: float = 1.0
+var skill_burst_time: float = 0.0
+var attack_bonus_percent: float = 0.0
+var attack_speed_bonus_percent: float = 0.0
+var damage_absorption: float = 0.0
+var stun_time: float = 0.0
+var slow_time: float = 0.0
+var slow_multiplier: float = 1.0
+var taunt_time: float = 0.0
+var taunt_target_id: int = 0
+var party_buff_time: float = 0.0
+var party_buff_attack: float = 0.0
+var party_buff_attack_speed: float = 0.0
 
+var _death_cleanup_timer: SceneTreeTimer
 var _dead: bool = false
 var _attacking: bool = false
 var _attack_timer: float = 0.0
@@ -39,14 +59,14 @@ func _ready() -> void:
 func setup(
 	unit_name: String,
 	hero: bool,
-		boss: bool,
-		unit_level: int,
-		unit_stats: Dictionary,
-		unit_attack_type: String,
-		unit_range: float,
-		unit_facing: int,
-		frames: SpriteFrames,
-		visual_scale: float = 0.90
+	boss: bool,
+	unit_level: int,
+	unit_stats: Dictionary,
+	unit_attack_type: String,
+	unit_range: float,
+	unit_facing: int,
+	frames: SpriteFrames,
+	visual_scale: float = 0.90
 ) -> void:
 	display_name = unit_name
 	is_hero = hero
@@ -55,7 +75,8 @@ func setup(
 	stats = unit_stats.duplicate(true)
 	attack_type = unit_attack_type
 	attack_range = maxf(12.0, unit_range)
-	attack_speed = maxf(0.1, float(stats.get("attack_speed", 1.0)))
+	base_attack_speed = maxf(0.1, float(stats.get("attack_speed", 1.0)))
+	attack_speed = base_attack_speed
 	move_speed = 150.0 + attack_speed * 25.0
 	facing = -1 if unit_facing < 0 else 1
 	sprite_frames = frames
@@ -84,6 +105,21 @@ func tick(delta: float) -> void:
 		_death_timer = maxf(0.0, _death_timer - delta)
 		return
 	attack_cooldown = maxf(0.0, attack_cooldown - delta)
+	stun_time = maxf(0.0, stun_time - delta)
+	slow_time = maxf(0.0, slow_time - delta)
+	if slow_time <= 0.0:
+		slow_multiplier = 1.0
+	taunt_time = maxf(0.0, taunt_time - delta)
+	party_buff_time = maxf(0.0, party_buff_time - delta)
+	if party_buff_time <= 0.0:
+		attack_bonus_percent = 0.0
+		attack_speed_bonus_percent = 0.0
+	if skill_burst_time > 0.0:
+		skill_burst_time = maxf(0.0, skill_burst_time - delta)
+		if skill_burst_time <= 0.0:
+			skill_burst_multiplier = 1.0
+	attack_speed = maxf(0.1, base_attack_speed * (1.0 + attack_speed_bonus_percent) * skill_burst_multiplier)
+	move_speed = (150.0 + attack_speed * 25.0) * (slow_multiplier if slow_time > 0.0 else 1.0)
 	if _hit_timer > 0.0:
 		_hit_timer = maxf(0.0, _hit_timer - delta)
 		if _hit_timer <= 0.0 and not _attacking:
@@ -95,7 +131,7 @@ func tick(delta: float) -> void:
 			play_animation("idle")
 
 func can_attack() -> bool:
-	return not _dead and current_hp > 0.0 and attack_cooldown <= 0.0
+	return not _dead and current_hp > 0.0 and attack_cooldown <= 0.0 and stun_time <= 0.0
 
 func begin_attack() -> bool:
 	if not can_attack():
@@ -106,23 +142,88 @@ func begin_attack() -> bool:
 	play_animation("attack")
 	return true
 
-func take_damage(amount: int, is_crit: bool) -> void:
+func take_damage(amount: int, is_crit: bool, damage_element: String = "physical") -> void:
 	if _dead or amount <= 0:
 		return
-	current_hp = maxf(0.0, current_hp - float(amount))
+	var final_amount: int = maxi(0, amount)
+	if damage_absorption > 0.0:
+		var absorbed: float = minf(damage_absorption, float(final_amount))
+		damage_absorption -= absorbed
+		final_amount = maxi(0, final_amount - int(round(absorbed)))
+	var passive_reduction: float = clampf(float(stats.get("damage_absorption_percent", 0.0)), 0.0, 0.75)
+	final_amount = maxi(0, int(round(float(final_amount) * (1.0 - passive_reduction))))
+	if final_amount <= 0:
+		return
+	current_hp = maxf(0.0, current_hp - float(final_amount))
 	queue_redraw()
 	_hit_timer = 0.16
 	_attacking = false
 	_attack_timer = 0.0
 	play_animation("hit")
-	damaged.emit(self, amount, is_crit)
+	damaged.emit(self, final_amount, is_crit, CombatMath.normalize_element(damage_element))
 	if current_hp <= 0.0:
 		_dead = true
 		_hit_timer = 0.0
 		play_animation("death")
 		died.emit(self)
-		var cleanup_timer: SceneTreeTimer = get_tree().create_timer(1.20)
-		cleanup_timer.timeout.connect(queue_free)
+		_death_cleanup_timer = get_tree().create_timer(1.20)
+		_death_cleanup_timer.timeout.connect(_on_death_cleanup_timeout)
+
+func heal(amount: int) -> int:
+	if _dead or amount <= 0 or current_hp <= 0.0:
+		return 0
+	var previous: float = current_hp
+	current_hp = minf(max_hp, current_hp + float(amount))
+	queue_redraw()
+	return maxi(0, int(round(current_hp - previous)))
+
+func apply_skill_effect(effect_type: String, value: float, duration: float = 0.0, _element: String = "physical") -> void:
+	match effect_type:
+		"stun":
+			stun_time = maxf(stun_time, duration)
+		"slow":
+			slow_time = maxf(slow_time, duration)
+			slow_multiplier = clampf(1.0 - value, 0.10, 1.0)
+		"attack_speed_burst":
+			skill_burst_multiplier = maxf(1.0, value)
+			skill_burst_time = maxf(skill_burst_time, duration)
+		"damage_absorption":
+			damage_absorption = maxf(damage_absorption, value)
+		"taunt":
+			taunt_time = maxf(taunt_time, duration)
+		"heal":
+			heal(int(round(value)))
+		_:
+			pass
+
+func configure_skills(hero_class_id: String, hero_element: String, levels: Dictionary, equipped: Array[String]) -> void:
+	class_id = hero_class_id
+	element = CombatMath.normalize_element(hero_element)
+	skill_levels = levels.duplicate(true)
+	equipped_active_skills = equipped.duplicate()
+	skill_cooldowns.clear()
+
+func get_attack_value() -> float:
+	return maxf(0.0, float(stats.get("attack", 0.0)) * (1.0 + attack_bonus_percent))
+
+func revive(hp_ratio: float = 0.5) -> bool:
+	if not _dead or current_hp > 0.0:
+		return false
+	_dead = false
+	current_hp = maxf(1.0, max_hp * clampf(hp_ratio, 0.1, 1.0))
+	_hit_timer = 0.0
+	_attacking = false
+	_attack_timer = 0.0
+	stun_time = 0.0
+	slow_time = 0.0
+	slow_multiplier = 1.0
+	damage_absorption = 0.0
+	play_animation("idle")
+	queue_redraw()
+	return true
+
+func is_stunned() -> bool:
+	return stun_time > 0.0
 
 func is_alive() -> bool:
 	return not _dead and current_hp > 0.0 and is_instance_valid(self)
@@ -199,6 +300,10 @@ func _update_sprite_ground_offset() -> void:
 
 func _on_frame_changed() -> void:
 	_update_sprite_ground_offset()
+
+func _on_death_cleanup_timeout() -> void:
+	if _dead:
+		queue_free()
 
 func _on_animation_finished() -> void:
 	if _dead:

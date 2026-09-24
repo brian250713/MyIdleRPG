@@ -95,4 +95,4 @@ func test_v1_to_v2_save_migration() -> bool:
 	var hero: Dictionary = party[0]
 	var inventory: Dictionary = migrated.get("inventory", {})
 	var equipment: Dictionary = hero.get("equipment", {})
-	return int(migrated["version"]) == 2 and int(migrated["soul_stones"]) == 0 and inventory.get("slots", []).size() == 40 and Chests.get_queue_size(migrated["chests"]) == 0 and equipment.has("weapon") and equipment["weapon"] == null and int(hero["level"]) == 3
+	return int(migrated["version"]) == SaveCodec.VERSION and int(migrated["soul_stones"]) == 0 and inventory.get("slots", []).size() == 40 and Chests.get_queue_size(migrated["chests"]) == 0 and equipment.has("weapon") and equipment["weapon"] == null and int(hero["level"]) == 3

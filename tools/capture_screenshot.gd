@@ -17,6 +17,8 @@ func _run_capture() -> void:
 	window_manager.call("set_expanded", expanded)
 	window_manager.call("apply_window_mode")
 
+	if OS.get_environment("CAP_DEBUG_SKILLS") == "1":
+		game_state.call("seed_debug_skills")
 	var packed_scene: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	if packed_scene == null:
 		print("CAPTURE_ERROR=missing_main_scene")

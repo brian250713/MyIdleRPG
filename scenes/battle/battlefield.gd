@@ -46,10 +46,11 @@ func start_campaign() -> void:
 		return
 	var save_state: Dictionary = GameState.get_save_state()
 	var settings: Dictionary = save_state.get("settings", {})
-	var saved_stage: Dictionary = StageData.get_stage_by_index(int(save_state.get("current_stage", 0)))
+	var difficulty_id: String = GameState.get_current_difficulty()
+	var saved_stage: Dictionary = StageData.get_stage_by_index(int(save_state.get("current_stage", 0)), difficulty_id)
 	var initial_state: Dictionary = {
 		"current_stage": int(save_state.get("current_stage", 0)),
-		"unlocked_stage": int(save_state.get("unlocked_stage", 0)),
+		"unlocked_stage": GameState.get_unlocked_stage(),
 		"wave_count": maxi(1, int(saved_stage.get("wave_count", 5))),
 		"wave_index": 0,
 		"boss_active": false,
@@ -74,6 +75,17 @@ func select_stage(stage_index: int) -> void:
 	GameState.set_current_stage(stage_index)
 	_begin_stage(stage_index)
 
+func select_difficulty(difficulty_id: String) -> void:
+	if not GameState.set_difficulty(difficulty_id):
+		_last_status = "尚未解鎖此難度"
+		return
+	if _progression == null:
+		start_campaign()
+		return
+	_stage_clear_timer = 0.0
+	_retreat_timer = 0.0
+	_begin_stage(GameState.get_current_stage())
+
 func set_auto_advance(enabled: bool) -> void:
 	if _progression != null:
 		_progression.set_auto_advance(enabled)
@@ -95,7 +107,7 @@ func get_snapshot() -> Dictionary:
 		boss_active = _progression.is_boss_active() or _boss_pending
 	return {
 		"stage_index": _stage_index,
-		"stage_name": StageData.get_display_name(_stage_index),
+		"stage_name": StageData.get_display_name(_stage_index, GameState.get_current_difficulty()),
 		"wave_number": wave_number,
 		"wave_count": wave_count,
 		"boss_active": boss_active,
@@ -142,7 +154,7 @@ func _input(event: InputEvent) -> void:
 func _begin_stage(stage_index: int) -> void:
 	_clear_units()
 	_stage_index = clampi(stage_index, 0, StageData.get_stage_count() - 1)
-	_stage_data = StageData.get_stage_by_index(_stage_index)
+	_stage_data = StageData.get_stage_by_index(_stage_index, GameState.get_current_difficulty())
 	var wave_count: int = maxi(1, int(_stage_data.get("wave_count", 5)))
 	_progression.start_stage(_stage_index, wave_count)
 	_wave_spawn_timer = 0.65
@@ -152,10 +164,10 @@ func _begin_stage(stage_index: int) -> void:
 	_wipe_handled = false
 	_stage_clear_timer = 0.0
 	_retreat_timer = 0.0
-	_last_status = "%s 出發" % StageData.get_display_name(_stage_index)
+	_last_status = "%s 出發" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
 	GameState.set_current_stage(_stage_index)
 	_spawn_heroes()
-	EventBus.stage_changed.emit(_stage_index, StageData.get_display_name(_stage_index))
+	EventBus.stage_changed.emit(_stage_index, StageData.get_display_name(_stage_index, GameState.get_current_difficulty()))
 	EventBus.wave_changed.emit(1, wave_count, false)
 	stage_progress_changed.emit()
 
@@ -185,6 +197,10 @@ func _spawn_heroes() -> void:
 			spawn_position
 		)
 		if unit != null:
+			var skill_state: Dictionary = GameState.get_skill_state(class_id)
+			var skill_levels: Dictionary = skill_state.get("skill_levels", {})
+			var equipped_actives: Array[String] = Skills.get_equipped_active_ids(skill_state)
+			unit.configure_skills(class_id, ClassData.get_default_element(class_id), skill_levels, equipped_actives)
 			_heroes.append(unit)
 
 func _spawn_wave() -> void:
@@ -199,7 +215,7 @@ func _spawn_wave() -> void:
 	var count: int = 2 + (1 if _progression.get_wave_index() >= 3 else 0)
 	for index: int in range(count):
 		var monster_id: String = str(pool[(index + _progression.get_wave_index()) % pool.size()])
-		var definition: Dictionary = MonsterScaling.scale_monster(monster_id, level)
+		var definition: Dictionary = MonsterScaling.scale_monster(monster_id, level, str(_stage_data.get("difficulty_id", "normal")))
 		if definition.is_empty():
 			continue
 		var spawn_position: Vector2 = Vector2(size.x + 70.0 + float(index) * 78.0, _ground_y())
@@ -214,7 +230,8 @@ func _spawn_wave() -> void:
 			float(definition.get("range", 55.0)),
 			-1,
 			float(definition.get("visual_scale", 0.90)),
-			spawn_position
+			spawn_position,
+			str(definition.get("element", "physical"))
 		)
 		if unit != null:
 			_monsters.append(unit)
@@ -224,7 +241,7 @@ func _spawn_wave() -> void:
 
 func _spawn_boss() -> void:
 	var boss_id: String = str(_stage_data.get("boss", "boss_andromeda"))
-	var definition: Dictionary = MonsterScaling.scale_monster(boss_id, int(_stage_data.get("recommended_level", 10)))
+	var definition: Dictionary = MonsterScaling.scale_monster(boss_id, int(_stage_data.get("recommended_level", 10)), str(_stage_data.get("difficulty_id", "normal")))
 	if definition.is_empty():
 		return
 	var unit: BattleUnit = _create_unit(
@@ -238,7 +255,8 @@ func _spawn_boss() -> void:
 		float(definition.get("range", 65.0)),
 		-1,
 		float(definition.get("visual_scale", 1.18)),
-		Vector2(size.x + 80.0, _ground_y())
+		Vector2(size.x + 80.0, _ground_y()),
+		str(definition.get("element", "physical"))
 	)
 	if unit != null:
 		_monsters.append(unit)
@@ -258,7 +276,8 @@ func _create_unit(
 	unit_range: float,
 	facing: int,
 	visual_scale: float,
-	spawn_position: Vector2
+	spawn_position: Vector2,
+	unit_element: String = "physical"
 ) -> BattleUnit:
 	var unit: BattleUnit = UnitScene.instantiate() as BattleUnit
 	if unit == null:
@@ -269,6 +288,7 @@ func _create_unit(
 		frames = _make_fallback_frames()
 	var stats_dictionary: Dictionary = unit_stats as Dictionary
 	unit.setup(unit_name, hero, boss, level, stats_dictionary, unit_attack_type, unit_range, facing, frames, visual_scale)
+	unit.element = CombatMath.normalize_element(unit_element)
 	unit.position = Vector2(spawn_position.x, _ground_y())
 	unit.set_ground_y(_ground_y())
 	unit.died.connect(_on_unit_died)
@@ -281,6 +301,12 @@ func _update_units(delta: float) -> void:
 		if not is_instance_valid(unit) or not unit.is_alive():
 			continue
 		unit.tick(delta)
+		_update_hero_skills(unit, delta)
+		if not is_instance_valid(unit) or not unit.is_alive():
+			continue
+		if unit.is_stunned():
+			unit.play_animation("idle")
+			continue
 		var target: BattleUnit = _find_nearest_enemy(unit, _monsters)
 		if target == null:
 			_move_unit_toward_x(unit, _hero_formation_x(hero_index), delta)
@@ -300,6 +326,9 @@ func _update_units(delta: float) -> void:
 		if not is_instance_valid(unit) or not unit.is_alive():
 			continue
 		unit.tick(delta)
+		if unit.is_stunned():
+			unit.play_animation("idle")
+			continue
 		var target: BattleUnit = _find_nearest_enemy(unit, _heroes)
 		if target == null:
 			unit.play_animation("idle")
@@ -315,13 +344,219 @@ func _update_units(delta: float) -> void:
 			if unit.begin_attack():
 				_perform_attack(unit, target)
 
+func _update_hero_skills(unit: BattleUnit, delta: float) -> void:
+	for raw_skill_id: Variant in unit.skill_cooldowns.keys():
+		var skill_id: String = str(raw_skill_id)
+		unit.skill_cooldowns[skill_id] = maxf(0.0, float(unit.skill_cooldowns[skill_id]) - delta)
+	if not is_instance_valid(unit) or not unit.is_alive() or unit.equipped_active_skills.is_empty():
+		return
+	var context: Dictionary = _build_skill_context(unit)
+	var skill_state: Dictionary = GameState.get_skill_state(unit.class_id)
+	var chosen_skill: String = Skills.choose_auto_skill(skill_state, int(GameState.get_hero(unit.class_id).get("level", 1)), context, unit.skill_cooldowns)
+	if chosen_skill.is_empty():
+		return
+	var skill_level: int = Skills.get_skill_level(skill_state, chosen_skill)
+	var effect: Dictionary = Skills.get_effect_definition(chosen_skill, skill_level)
+	var passive_modifiers: Dictionary = Skills.get_passive_modifiers(unit.class_id, unit.skill_levels)
+	unit.skill_cooldowns[chosen_skill] = Skills.get_cooldown_seconds(effect, passive_modifiers)
+	_cast_skill_for_unit(unit, chosen_skill, skill_level, context, passive_modifiers)
+
+func _build_skill_context(unit: BattleUnit) -> Dictionary:
+	var allies: Array = _build_unit_contexts(_heroes)
+	var enemies: Array = _build_unit_contexts(_monsters)
+	var target: BattleUnit = _find_nearest_enemy(unit, _monsters)
+	var target_context: Dictionary = _build_unit_context(target)
+	var targeted_units: Array = []
+	var non_tank_targeted: bool = false
+	for monster: BattleUnit in _monsters:
+		if not is_instance_valid(monster) or not monster.is_alive():
+			continue
+		var monster_target: BattleUnit = _find_nearest_enemy(monster, _heroes)
+		if monster_target == null:
+			continue
+		var target_data: Dictionary = _build_unit_context(monster_target)
+		targeted_units.append(target_data)
+		if not bool(target_data.get("is_tank", false)):
+			non_tank_targeted = true
+	var party_hp: float = 0.0
+	var party_max_hp: float = 0.0
+	for ally: Dictionary in allies:
+		if bool(ally.get("is_dead", false)):
+			continue
+		party_hp += float(ally.get("hp", 0.0))
+		party_max_hp += float(ally.get("max_hp", 0.0))
+	return {
+		"caster": _build_unit_context(unit),
+		"allies": allies,
+		"enemies": enemies,
+		"line_enemies": enemies,
+		"target": target_context,
+		"targeted_units": targeted_units,
+		"non_tank_targeted": non_tank_targeted,
+		"caster_hp_ratio": unit.get_hp_ratio(),
+		"party_hp_ratio": party_hp / maxf(1.0, party_max_hp),
+		"boss_active": _boss_pending or _has_boss_monster(),
+		"rng": _rng
+	}
+
+func _build_unit_contexts(units: Array[BattleUnit]) -> Array:
+	var result: Array = []
+	for unit: BattleUnit in units:
+		if is_instance_valid(unit):
+			result.append(_build_unit_context(unit))
+	return result
+
+func _build_unit_context(unit: BattleUnit) -> Dictionary:
+	if unit == null or not is_instance_valid(unit):
+		return {}
+	return {
+		"id": str(unit.get_instance_id()),
+		"position": unit.position,
+		"hp": unit.current_hp,
+		"max_hp": unit.max_hp,
+		"level": unit.level,
+		"is_dead": not unit.is_alive(),
+		"stats": unit.stats.duplicate(true),
+		"element": unit.element,
+		"is_tank": unit.is_hero and (unit.class_id == "knight" or unit.class_id == "priest")
+	}
+
+func _cast_skill_for_unit(unit: BattleUnit, skill_id: String, skill_level: int, context: Dictionary, passive_modifiers: Dictionary) -> void:
+	var result: Dictionary = Skills.cast_skill(skill_id, skill_level, context, passive_modifiers)
+	if not bool(result.get("ok", false)):
+		return
+	var effect_type: String = str(result.get("effect_type", ""))
+	var effect_position: Vector2 = unit.position + Vector2(0.0, -42.0)
+	if effect_type == "direct_damage" or effect_type == "pierce" or effect_type == "aoe" or effect_type == "stun" or effect_type == "slow" or effect_type == "taunt":
+		var target_context: Dictionary = context.get("target", {})
+		if target_context is Dictionary and not target_context.is_empty():
+			effect_position = target_context.get("position", effect_position)
+	else:
+		var effect_targets: Array = result.get("targets", [])
+		if not effect_targets.is_empty() and effect_targets[0] is Dictionary:
+			effect_position = (effect_targets[0] as Dictionary).get("position", effect_position)
+	_spawn_skill_effect(_clamp_effect_position(effect_position), result)
+	match effect_type:
+		"direct_damage", "pierce", "aoe", "stun", "slow":
+			_apply_skill_damage(result)
+			if effect_type == "stun":
+				_apply_skill_status(result.get("targets", []), "stun", 0.0, float(result.get("stun_duration", result.get("duration", 0.0))))
+			elif effect_type == "slow":
+				_apply_skill_status(result.get("targets", []), "slow", float(result.get("slow_multiplier", 1.0)), float(result.get("duration", 0.0)))
+		"heal":
+			_apply_skill_heal(result.get("targets", []))
+		"taunt":
+			for target_value: Variant in result.get("targets", []):
+				if target_value is Dictionary:
+					var monster: BattleUnit = _find_unit_by_id(str(target_value.get("id", "")))
+					if monster != null and not monster.is_hero:
+						monster.taunt_time = maxf(monster.taunt_time, float(result.get("taunt_duration", 3.0)))
+						monster.taunt_target_id = unit.get_instance_id()
+		"party_buff":
+			_apply_party_buff(result)
+		"attack_speed_burst":
+			unit.apply_skill_effect("attack_speed_burst", float(result.get("value", 1.0)), float(result.get("duration", 0.0)))
+		"damage_absorption":
+			for target_value: Variant in result.get("targets", []):
+				if target_value is Dictionary:
+					var target_unit: BattleUnit = _find_unit_by_id(str(target_value.get("id", "")))
+					if target_unit != null:
+						target_unit.apply_skill_effect("damage_absorption", float(target_value.get("amount", 0.0)), float(target_value.get("duration", 0.0)))
+		"damage_absorption_party":
+			for target_value: Variant in result.get("targets", []):
+				if target_value is Dictionary:
+					var target_unit: BattleUnit = _find_unit_by_id(str(target_value.get("id", "")))
+					if target_unit != null:
+						target_unit.apply_skill_effect("damage_absorption", float(target_value.get("amount", 0.0)), float(target_value.get("duration", 0.0)))
+		"resurrect":
+			for target_value: Variant in result.get("targets", []):
+				if target_value is Dictionary:
+					var target_unit: BattleUnit = _find_unit_by_id(str(target_value.get("id", "")))
+					if target_unit != null:
+						target_unit.revive(float(target_value.get("hp_ratio", 0.5)))
+		_:
+			pass
+
+func _apply_skill_damage(result: Dictionary) -> void:
+	var hits: Array = result.get("hits", [])
+	var damage_element: String = str(result.get("element", "physical"))
+	for hit_value: Variant in hits:
+		if not (hit_value is Dictionary):
+			continue
+		var hit: Dictionary = hit_value
+		var target: BattleUnit = _find_unit_by_id(str(hit.get("id", "")))
+		if target != null and target.is_alive():
+			target.take_damage(int(hit.get("amount", 1)), bool(hit.get("crit", false)), damage_element)
+
+func _apply_skill_status(targets_value: Variant, status: String, value: float, duration: float) -> void:
+	if not (targets_value is Array):
+		return
+	for target_value: Variant in targets_value:
+		if not (target_value is Dictionary):
+			continue
+		var target: BattleUnit = _find_unit_by_id(str(target_value.get("id", "")))
+		if target == null:
+			continue
+		if status == "slow":
+			target.apply_skill_effect("slow", 1.0 - clampf(value, 0.0, 1.0), duration)
+		else:
+			target.apply_skill_effect("stun", value, duration)
+
+func _apply_skill_heal(targets_value: Variant) -> void:
+	if not (targets_value is Array):
+		return
+	for target_value: Variant in targets_value:
+		if target_value is Dictionary:
+			var target: BattleUnit = _find_unit_by_id(str(target_value.get("id", "")))
+			if target != null:
+				target.heal(int(target_value.get("amount", 0)))
+
+func _apply_party_buff(result: Dictionary) -> void:
+	var duration: float = float(result.get("duration", 0.0))
+	var attack_value: float = float(result.get("stat_value", 0.0)) if str(result.get("stat_id", "")) == "attack_percent" else 0.0
+	var attack_speed_value: float = float(result.get("stat_value", 0.0)) if str(result.get("stat_id", "")) == "attack_speed_percent" else 0.0
+	for hero: BattleUnit in _heroes:
+		if is_instance_valid(hero) and hero.is_alive():
+			hero.party_buff_time = maxf(hero.party_buff_time, duration)
+			hero.party_buff_attack = maxf(hero.party_buff_attack, attack_value)
+			hero.party_buff_attack_speed = maxf(hero.party_buff_attack_speed, attack_speed_value)
+			hero.attack_bonus_percent = hero.party_buff_attack
+			hero.attack_speed_bonus_percent = hero.party_buff_attack_speed
+
+func _find_unit_by_id(unit_id: String) -> BattleUnit:
+	var numeric_id: int = unit_id.to_int()
+	for unit: BattleUnit in _heroes:
+		if is_instance_valid(unit) and unit.get_instance_id() == numeric_id:
+			return unit
+	for unit: BattleUnit in _monsters:
+		if is_instance_valid(unit) and unit.get_instance_id() == numeric_id:
+			return unit
+	return null
+
+func _has_boss_monster() -> bool:
+	for unit: BattleUnit in _monsters:
+		if is_instance_valid(unit) and unit.is_alive() and unit.is_boss:
+			return true
+	return false
+
+func _spawn_skill_effect(effect_position: Vector2, result: Dictionary) -> void:
+	var effect: SkillEffect = SkillEffect.new()
+	_world_layer.add_child(effect)
+	effect.position = effect_position
+	effect.setup(str(result.get("fx", "fx_impact")), str(result.get("name", "技能")), str(result.get("element", "physical")))
+
+func _clamp_effect_position(effect_position: Vector2) -> Vector2:
+	var visible_width: float = maxf(1.0, size.x - 24.0)
+	return Vector2(clampf(effect_position.x, 24.0, visible_width), clampf(effect_position.y, 22.0, maxf(22.0, size.y - 8.0)))
+
 func _perform_attack(attacker: BattleUnit, target: BattleUnit) -> void:
-	var result: Dictionary = CombatMath.calculate_damage(
-		float(attacker.stats.get("attack", 1.0)),
-		float(target.stats.get("defense", 0.0)),
+	var result: Dictionary = CombatMath.calculate_damage_for_target(
+		attacker.get_attack_value(),
+		target.stats,
 		float(attacker.stats.get("crit_chance", 0.0)),
 		float(attacker.stats.get("crit_damage", 1.5)),
-		_rng
+		_rng,
+		attacker.element
 	)
 	var amount: int = int(result["amount"])
 	var is_crit: bool = bool(result["is_crit"])
@@ -331,9 +566,9 @@ func _perform_attack(attacker: BattleUnit, target: BattleUnit) -> void:
 			return
 		_world_layer.add_child(projectile)
 		projectile.position = attacker.position + Vector2(float(attacker.facing) * 22.0, -8.0)
-		projectile.setup(target, amount, is_crit, attacker.sprite_frames, attacker.has_projectile_animation(), 300.0 + float(attacker.attack_speed) * 35.0)
+		projectile.setup(target, amount, is_crit, attacker.sprite_frames, attacker.has_projectile_animation(), 300.0 + float(attacker.attack_speed) * 35.0, attacker.element)
 	else:
-		target.take_damage(amount, is_crit)
+		target.take_damage(amount, is_crit, attacker.element)
 
 func _update_spawning(delta: float) -> void:
 	if _boss_pending or not _stage_active:
@@ -370,12 +605,12 @@ func _check_stage_completion() -> void:
 			_boss_pending = false
 			_progression.on_boss_defeated()
 			GameState.unlock_stage(mini(StageData.get_stage_count() - 1, _stage_index + 1))
-			_last_status = "%s 已通關" % StageData.get_display_name(_stage_index)
+			_last_status = "%s 已通關" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
 			stage_cleared.emit(_stage_index)
 			EventBus.stage_cleared.emit(_stage_index)
 			_stage_clear_timer = 2.2
 			if not _progression.is_auto_advance():
-				_last_status = "%s 已通關，自動推進已關閉" % StageData.get_display_name(_stage_index)
+				_last_status = "%s 已通關，自動推進已關閉" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
 
 func _advance_after_clear() -> void:
 	var result: String = _progression.advance_to_next_stage()
@@ -390,7 +625,7 @@ func _advance_after_clear() -> void:
 	else:
 		_last_status = "關卡已通關，準備重新挑戰"
 
-func _on_unit_damaged(unit: BattleUnit, amount: int, is_crit: bool) -> void:
+func _on_unit_damaged(unit: BattleUnit, amount: int, is_crit: bool, damage_element: String = "physical") -> void:
 	if not is_instance_valid(unit):
 		return
 	var hit_effect: BattleHitEffect = HitEffectScene.instantiate() as BattleHitEffect
@@ -404,7 +639,7 @@ func _on_unit_damaged(unit: BattleUnit, amount: int, is_crit: bool) -> void:
 		return
 	_world_layer.add_child(damage_number)
 	damage_number.position = unit.position + Vector2(0.0, -52.0)
-	damage_number.setup(amount, is_crit)
+	damage_number.setup(amount, is_crit, damage_element)
 	EventBus.damage_dealt.emit(amount, is_crit, unit.position)
 
 func _on_unit_died(unit: BattleUnit) -> void:
@@ -432,6 +667,10 @@ func _spawn_chest_feedback(drop_position: Vector2, chest: Dictionary) -> void:
 	feedback.setup(str(chest.get("type", "white")))
 
 func _find_nearest_enemy(unit: BattleUnit, candidates: Array[BattleUnit]) -> BattleUnit:
+	if unit.taunt_time > 0.0 and unit.taunt_target_id != 0:
+		for candidate: BattleUnit in candidates:
+			if is_instance_valid(candidate) and candidate.is_alive() and candidate.get_instance_id() == unit.taunt_target_id:
+				return candidate
 	var nearest: BattleUnit = null
 	var nearest_distance: float = INF
 	for candidate: BattleUnit in candidates:

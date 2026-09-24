@@ -6,7 +6,7 @@ static func get_monster_ids() -> Array[String]:
 		"neutral_gnasher", "neutral_ghostlynx", "neutral_giantcrab", "neutral_golemstone",
 		"neutral_mercpirate", "neutral_mercmelee1", "neutral_monsterdragonhawk",
 		"neutral_monsterlightningbeetle", "neutral_monstercrystalwisp", "neutral_prongbok",
-		"boss_andromeda", "boss_chaosknight", "boss_legion"
+		"fire_drake", "chaos_reaver", "boss_andromeda", "boss_chaosknight", "boss_legion"
 	]
 	return ids
 
@@ -27,21 +27,26 @@ static func get_regular_pool() -> Array[String]:
 		"neutral_monsterlightningbeetle", "neutral_monstercrystalwisp", "neutral_prongbok"
 	]
 
+static func get_element(monster_id: String) -> String:
+	return str(get_monster_definition(monster_id).get("element", "physical"))
+
 static func _get_definitions() -> Dictionary:
 	return {
-		"neutral_gnasher": _unit("neutral_gnasher", "裂齒野獸", 86.0, 12.0, 54.0, 8.0, 1.00, 0.03, 8.0, 0.08),
-		"neutral_ghostlynx": _unit("neutral_ghostlynx", "幽影貓", 72.0, 15.0, 58.0, 6.0, 1.18, 0.08, 5.0, 0.06),
-		"neutral_giantcrab": _unit("neutral_giantcrab", "巨岩蟹", 132.0, 16.0, 48.0, 18.0, 0.82, 0.03, 11.0, 0.12),
-		"neutral_golemstone": _unit("neutral_golemstone", "石魔", 164.0, 18.0, 42.0, 24.0, 0.72, 0.02, 9.0, 0.14),
-		"neutral_mercpirate": _unit("neutral_mercpirate", "潮汐海盜", 98.0, 20.0, 60.0, 11.0, 1.08, 0.07, 7.0, 0.10),
-		"neutral_mercmelee1": _unit("neutral_mercmelee1", "傭兵戰士", 108.0, 18.0, 62.0, 13.0, 0.98, 0.05, 7.0, 0.10),
-		"neutral_monsterdragonhawk": _ranged_unit("neutral_monsterdragonhawk", "飛龍", 94.0, 21.0, 110.0, 9.0, 1.05, 0.06, 6.0, 0.08),
-		"neutral_monsterlightningbeetle": _ranged_unit("neutral_monsterlightningbeetle", "雷甲蟲", 86.0, 22.0, 128.0, 7.0, 1.00, 0.05, 5.0, 0.06),
-		"neutral_monstercrystalwisp": _ranged_unit("neutral_monstercrystalwisp", "水晶精靈", 78.0, 24.0, 138.0, 5.0, 0.92, 0.10, 4.0, 0.05),
-		"neutral_prongbok": _unit("neutral_prongbok", "角鹿", 94.0, 17.0, 70.0, 9.0, 1.12, 0.04, 8.0, 0.09),
-		"boss_andromeda": _boss("boss_andromeda", "安德羅墨達", 510.0, 30.0, 72.0, 22.0, 0.92, 0.08, 1.18),
-		"boss_chaosknight": _boss("boss_chaosknight", "混沌騎士", 660.0, 38.0, 68.0, 28.0, 0.86, 0.10, 1.25),
-		"boss_legion": _boss("boss_legion", "無限軍團", 820.0, 44.0, 76.0, 34.0, 0.78, 0.12, 1.32)
+		"neutral_gnasher": _with_element(_unit("neutral_gnasher", "裂齒野獸", 86.0, 12.0, 54.0, 8.0, 1.00, 0.03, 8.0, 0.08), "physical"),
+		"neutral_ghostlynx": _with_element(_unit("neutral_ghostlynx", "幽影貓", 72.0, 15.0, 58.0, 6.0, 1.18, 0.08, 5.0, 0.06), "physical"),
+		"neutral_giantcrab": _with_element(_unit("neutral_giantcrab", "巨岩蟹", 132.0, 16.0, 48.0, 18.0, 0.82, 0.03, 11.0, 0.12), "physical"),
+		"neutral_golemstone": _with_element(_unit("neutral_golemstone", "石魔", 164.0, 18.0, 42.0, 24.0, 0.72, 0.02, 9.0, 0.14), "physical"),
+		"neutral_mercpirate": _with_element(_unit("neutral_mercpirate", "潮汐海盜", 98.0, 20.0, 60.0, 11.0, 1.08, 0.07, 7.0, 0.10), "physical"),
+		"neutral_mercmelee1": _with_element(_unit("neutral_mercmelee1", "傭兵戰士", 108.0, 18.0, 62.0, 13.0, 0.98, 0.05, 7.0, 0.10), "physical"),
+		"neutral_monsterdragonhawk": _with_element(_ranged_unit("neutral_monsterdragonhawk", "飛龍", 94.0, 21.0, 110.0, 9.0, 1.05, 0.06, 6.0, 0.08), "fire"),
+		"neutral_monsterlightningbeetle": _with_element(_ranged_unit("neutral_monsterlightningbeetle", "雷甲蟲", 86.0, 22.0, 128.0, 7.0, 1.00, 0.05, 5.0, 0.06), "lightning"),
+		"neutral_monstercrystalwisp": _with_element(_ranged_unit("neutral_monstercrystalwisp", "水晶精靈", 78.0, 24.0, 138.0, 5.0, 0.92, 0.10, 4.0, 0.05), "ice"),
+		"neutral_prongbok": _with_element(_unit("neutral_prongbok", "角鹿", 94.0, 17.0, 70.0, 9.0, 1.12, 0.04, 8.0, 0.09), "physical"),
+		"fire_drake": _with_element(_ranged_unit("neutral_monsterdragonhawk", "火焰飛龍", 125.0, 27.0, 120.0, 12.0, 0.96, 0.08, 8.0, 0.10), "fire"),
+		"chaos_reaver": _with_element(_unit("boss_chaosknight", "混沌掠奪者", 148.0, 29.0, 64.0, 16.0, 0.90, 0.10, 9.0, 0.12), "chaos"),
+		"boss_andromeda": _with_element(_boss("boss_andromeda", "安德羅墨達", 510.0, 30.0, 72.0, 22.0, 0.92, 0.08, 1.18), "fire"),
+		"boss_chaosknight": _with_element(_boss("boss_chaosknight", "混沌騎士", 660.0, 38.0, 68.0, 28.0, 0.86, 0.10, 1.25), "chaos"),
+		"boss_legion": _with_element(_boss("boss_legion", "無限軍團", 820.0, 44.0, 76.0, 34.0, 0.78, 0.12, 1.32), "chaos")
 	}
 
 static func _unit(sprite_id: String, unit_name: String, max_hp: float, attack: float, attack_range: float, defense: float, attack_speed: float, crit_chance: float, hp_growth: float, defense_growth: float) -> Dictionary:
@@ -92,3 +97,8 @@ static func _boss(sprite_id: String, boss_name: String, max_hp: float, attack: f
 	definition["growth"]["attack"] = 3.8
 	definition["growth"]["crit_damage"] = 0.015
 	return definition
+
+static func _with_element(definition: Dictionary, element: String) -> Dictionary:
+	var result: Dictionary = definition.duplicate(true)
+	result["element"] = element
+	return result

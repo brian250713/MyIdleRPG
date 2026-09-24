@@ -1,7 +1,7 @@
 class_name SaveCodec
 extends RefCounted
 
-const VERSION: int = 2
+const VERSION: int = 3
 
 static func make_default_state() -> Dictionary:
 	return {
@@ -10,6 +10,10 @@ static func make_default_state() -> Dictionary:
 		"current_stage": 0,
 		"unlocked_stage": 0,
 		"unlocked_party_slots": 1,
+		"difficulty": "normal",
+		"unlocked_difficulties": ["normal"],
+		"difficulty_progress": _default_difficulty_progress(),
+		"cleared_difficulties": [],
 		"party": [_make_hero("knight"), null, null],
 		"inventory": Inventory.create_inventory(),
 		"chests": Chests.create_state(),
@@ -45,11 +49,25 @@ static func normalize_state(state: Dictionary) -> Dictionary:
 				for setting_key: Variant in source_settings.keys():
 					normalized_settings[str(setting_key)] = source_settings[setting_key]
 		elif key == "inventory":
-			var source_inventory: Dictionary = state.get("inventory", {})
-			normalized["inventory"] = Inventory.normalize_inventory(source_inventory)
+			var source_inventory_value: Variant = state.get("inventory", {})
+			if source_inventory_value is Dictionary:
+				normalized["inventory"] = Inventory.normalize_inventory(source_inventory_value as Dictionary)
 		elif key == "chests":
-			var source_chests: Dictionary = state.get("chests", {})
-			normalized["chests"] = Chests.normalize_state(source_chests)
+			var source_chests_value: Variant = state.get("chests", {})
+			if source_chests_value is Dictionary:
+				normalized["chests"] = Chests.normalize_state(source_chests_value as Dictionary)
+		elif key == "unlocked_difficulties":
+			var source_difficulties: Variant = state.get("unlocked_difficulties", [])
+			if source_difficulties is Array:
+				normalized["unlocked_difficulties"] = _normalize_difficulty_list(source_difficulties)
+		elif key == "difficulty_progress":
+			var source_progress: Variant = state.get("difficulty_progress", {})
+			if source_progress is Dictionary:
+				normalized["difficulty_progress"] = _normalize_difficulty_progress(source_progress)
+		elif key == "cleared_difficulties":
+			var source_cleared: Variant = state.get("cleared_difficulties", [])
+			if source_cleared is Array:
+				normalized["cleared_difficulties"] = _normalize_difficulty_list(source_cleared)
 		elif key == "version":
 			continue
 		else:
@@ -64,9 +82,31 @@ static func normalize_state(state: Dictionary) -> Dictionary:
 			normalized_chests["auto_open"][chest_type] = bool(normalized_settings.get(setting_key, false))
 		else:
 			normalized_settings[setting_key] = bool(normalized_chests.get("auto_open", {}).get(chest_type, false))
-	normalized["unlocked_stage"] = clampi(int(normalized.get("unlocked_stage", 0)), 0, StageData.get_stage_count() - 1)
+	var difficulty_ids: Array[String] = DifficultyData.get_difficulty_ids()
+	var current_difficulty: String = str(normalized.get("difficulty", "normal"))
+	if not difficulty_ids.has(current_difficulty):
+		current_difficulty = "normal"
+	var unlocked_difficulties: Array = _normalize_difficulty_list(normalized.get("unlocked_difficulties", ["normal"]))
+	if not unlocked_difficulties.has("normal"):
+		unlocked_difficulties.append("normal")
+	if not unlocked_difficulties.has(current_difficulty):
+		current_difficulty = "normal"
+	var progress: Dictionary = _normalize_difficulty_progress(normalized.get("difficulty_progress", {}))
+	var legacy_unlocked_stage: int = clampi(int(normalized.get("unlocked_stage", 0)), 0, StageData.get_stage_count() - 1)
+	if int(progress.get(current_difficulty, 0)) == 0 and legacy_unlocked_stage > 0:
+		progress[current_difficulty] = legacy_unlocked_stage
+	if source_version < 3:
+		current_difficulty = "normal"
+		unlocked_difficulties = ["normal"]
+		progress = _default_difficulty_progress()
+		progress["normal"] = clampi(int(normalized.get("unlocked_stage", 0)), 0, StageData.get_stage_count() - 1)
+	normalized["difficulty"] = current_difficulty
+	normalized["unlocked_difficulties"] = unlocked_difficulties
+	normalized["difficulty_progress"] = progress
 	normalized["unlocked_party_slots"] = clampi(int(normalized.get("unlocked_party_slots", 1)), 1, 3)
-	normalized["current_stage"] = clampi(int(normalized.get("current_stage", 0)), 0, int(normalized["unlocked_stage"]))
+	var current_unlocked_stage: int = int(progress.get(current_difficulty, 0))
+	normalized["unlocked_stage"] = current_unlocked_stage
+	normalized["current_stage"] = clampi(int(normalized.get("current_stage", 0)), 0, current_unlocked_stage)
 	normalized["gold"] = maxi(0, int(normalized.get("gold", 0)))
 	normalized["soul_stones"] = maxi(0, int(normalized.get("soul_stones", 0)))
 	normalized["last_saved_unix"] = maxi(0, int(normalized.get("last_saved_unix", 0)))
@@ -102,7 +142,8 @@ static func _make_hero(class_id: String) -> Dictionary:
 		"class_id": class_id,
 		"level": 1,
 		"xp": 0,
-		"equipment": _empty_equipment()
+		"equipment": _empty_equipment(),
+		"skills": Skills.make_skill_state(class_id)
 	}
 
 static func _normalize_hero(hero: Dictionary) -> Dictionary:
@@ -113,12 +154,43 @@ static func _normalize_hero(hero: Dictionary) -> Dictionary:
 	var equipment: Dictionary = _empty_equipment()
 	if equipment_value is Dictionary:
 		equipment = _normalize_equipment(equipment_value)
+	var skills_value: Variant = hero.get("skills", {})
+	var source_skills: Dictionary = skills_value if skills_value is Dictionary else {}
+	var skills: Dictionary = Skills.normalize_skill_state(source_skills, class_id)
 	return {
 		"class_id": class_id,
 		"level": clampi(int(hero.get("level", 1)), 1, Stats.MAX_LEVEL),
 		"xp": maxi(0, int(hero.get("xp", 0))),
-		"equipment": equipment
+		"equipment": equipment,
+		"skills": skills
 	}
+
+static func _default_difficulty_progress() -> Dictionary:
+	var progress: Dictionary = {}
+	for difficulty_id: String in DifficultyData.get_difficulty_ids():
+		progress[difficulty_id] = 0
+	return progress
+
+static func _normalize_difficulty_list(source: Variant) -> Array:
+	var result: Array = []
+	if not (source is Array):
+		return ["normal"]
+	for raw_id: Variant in source:
+		var difficulty_id: String = str(raw_id)
+		if DifficultyData.get_difficulty_ids().has(difficulty_id) and not result.has(difficulty_id):
+			result.append(difficulty_id)
+	if not result.has("normal"):
+		result.append("normal")
+	return result
+
+static func _normalize_difficulty_progress(source: Variant) -> Dictionary:
+	var result: Dictionary = _default_difficulty_progress()
+	if source is Dictionary:
+		for raw_id: Variant in (source as Dictionary).keys():
+			var difficulty_id: String = str(raw_id)
+			if DifficultyData.get_difficulty_ids().has(difficulty_id):
+				result[difficulty_id] = clampi(int((source as Dictionary).get(raw_id, 0)), 0, StageData.get_stage_count() - 1)
+	return result
 
 static func _normalize_equipment(source: Dictionary) -> Dictionary:
 	var equipment: Dictionary = _empty_equipment()

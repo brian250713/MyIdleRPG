@@ -32,3 +32,7 @@ signal inventory_changed
 signal equipment_changed(class_id: String)
 @warning_ignore("unused_signal")
 signal chest_changed
+@warning_ignore("unused_signal")
+signal difficulty_changed(difficulty_id: String)
+@warning_ignore("unused_signal")
+signal skills_changed(class_id: String)

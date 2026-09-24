@@ -132,7 +132,7 @@ func _update_stage_text() -> void:
 	if _stage_label == null:
 		return
 	if _battlefield == null:
-		_stage_label.text = StageData.get_display_name(GameState.get_current_stage())
+		_stage_label.text = StageData.get_display_name(GameState.get_current_stage(), GameState.get_current_difficulty())
 		return
 	var snapshot: Dictionary = _battlefield.get_snapshot()
 	var wave_text: String = "首領" if bool(snapshot.get("boss_active", false)) else "第 %d/%d 波" % [int(snapshot.get("wave_number", 1)), int(snapshot.get("wave_count", 5))]

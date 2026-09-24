@@ -2,6 +2,7 @@ class_name ExpandedPanel
 extends PanelContainer
 
 signal stage_selected(stage_index: int)
+signal difficulty_selected(difficulty_id: String)
 signal auto_advance_changed(enabled: bool)
 
 var _tabs: TabContainer
@@ -9,7 +10,10 @@ var _party_content: VBoxContainer
 var _inventory_grid: GridContainer
 var _inventory_detail: VBoxContainer
 var _inventory_summary: Label
+var _skills_content: VBoxContainer
 var _stage_content: VBoxContainer
+var _difficulty_selector: OptionButton
+var _updating_difficulty: bool = false
 var _selected_inventory_slot: int = -1
 var _auto_setting_button: CheckButton
 var _topmost_setting_button: CheckButton
@@ -30,6 +34,7 @@ func _ready() -> void:
 func refresh() -> void:
 	_refresh_party_tab()
 	_refresh_inventory_tab()
+	_refresh_skills_tab()
 	_refresh_stage_tab()
 	_refresh_settings_tab()
 
@@ -63,7 +68,7 @@ func _build_interface() -> void:
 	column.add_child(_tabs)
 	_build_party_tab()
 	_build_inventory_tab()
-	_build_placeholder_tab("技能", "技能將在 Phase 3 開放。")
+	_build_skills_tab()
 	_build_placeholder_tab("方塊", "方塊將在 Phase 4 開放。")
 	_build_placeholder_tab("符文", "符文將在 Phase 4 開放。")
 	_build_stage_tab()
@@ -121,6 +126,16 @@ func _build_inventory_tab() -> void:
 	_inventory_detail = VBoxContainer.new()
 	_inventory_detail.add_theme_constant_override("separation", 5)
 	detail_margin.add_child(_inventory_detail)
+
+func _build_skills_tab() -> void:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.name = "技能"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_tabs.add_child(scroll)
+	_skills_content = VBoxContainer.new()
+	_skills_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_skills_content.add_theme_constant_override("separation", 8)
+	scroll.add_child(_skills_content)
 
 func _build_stage_tab() -> void:
 	var scroll: ScrollContainer = ScrollContainer.new()
@@ -304,7 +319,8 @@ func _refresh_inventory_detail() -> void:
 		for affix_value: Variant in affixes:
 			if affix_value is Dictionary:
 				var affix: Dictionary = affix_value
-				_inventory_detail.add_child(_make_label("詞綴：%s %s" % [str(affix.get("name", "")), _stat_text(str(affix.get("stat", "")), float(affix.get("value", 0.0)), bool(affix.get("percent", false)))], 11, Color(0.75, 0.84, 0.96)))
+				var affix_percent: bool = bool(affix.get("percent", false)) or _is_percent_stat(str(affix.get("stat", "")))
+				_inventory_detail.add_child(_make_label("詞綴：%s" % _stat_text(str(affix.get("stat", "")), float(affix.get("value", 0.0)), affix_percent), 11, Color(0.75, 0.84, 0.96)))
 	var sockets: Array = item.get("sockets", [])
 	var socket_names: Array[String] = []
 	for socket_value: Variant in sockets:
@@ -317,10 +333,10 @@ func _refresh_inventory_detail() -> void:
 		var current_stats: Dictionary = GameState.get_hero_stats(class_id)
 		var equipment: Dictionary = GameState.get_equipment(class_id)
 		equipment[str(item.get("slot", "weapon"))] = item
-		var candidate_stats: Dictionary = Stats.calculate_final_stats(class_id, int(lead_hero.get("level", 1)), equipment)
+		var candidate_stats: Dictionary = Stats.calculate_final_stats(class_id, int(lead_hero.get("level", 1)), equipment, GameState.get_skill_state(class_id))
 		var power_diff: int = Power.compare(candidate_stats, current_stats)
 		var diff_color: Color = Color(0.35, 0.95, 0.45) if power_diff >= 0 else Color(1.0, 0.38, 0.38)
-		_inventory_detail.add_child(_make_label("對比 %s：戰力 %+d" % [str(lead_hero.get("class_id", "")), power_diff], 13, diff_color))
+		_inventory_detail.add_child(_make_label("對比 %s：戰力 %+d" % [str(ClassData.get_class_definition(class_id).get("name", class_id)), power_diff], 13, diff_color))
 		var equip_row: HBoxContainer = HBoxContainer.new()
 		equip_row.add_theme_constant_override("separation", 4)
 		_inventory_detail.add_child(equip_row)
@@ -354,10 +370,136 @@ func _can_select_class(slot_index: int, candidate_id: String, party: Array) -> b
 			return false
 	return true
 
+func _refresh_skills_tab() -> void:
+	_clear_content(_skills_content)
+	var active_heroes: Array[Dictionary] = GameState.get_active_heroes()
+	for hero: Dictionary in active_heroes:
+		_skills_content.add_child(_make_skill_hero_card(hero))
+	_skills_content.add_child(_make_note("每級獲得 1 技能點；主動技能可裝備兩個，會依戰況自動施放。"))
+
+func _make_skill_hero_card(hero: Dictionary) -> PanelContainer:
+	var card: PanelContainer = PanelContainer.new()
+	card.add_theme_stylebox_override("panel", _make_card_style())
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top", 7)
+	margin.add_theme_constant_override("margin_bottom", 7)
+	card.add_child(margin)
+	var column: VBoxContainer = VBoxContainer.new()
+	column.add_theme_constant_override("separation", 5)
+	margin.add_child(column)
+	var class_id: String = str(hero.get("class_id", "knight"))
+	var class_title: String = str(ClassData.get_class_definition(class_id).get("name", class_id))
+	column.add_child(_make_label("%s  Lv.%d  ·  可用技能點 %d" % [class_title, int(hero.get("level", 1)), GameState.get_skill_points(class_id)], 15, Color(0.88, 0.93, 1.0)))
+	var skill_state: Dictionary = GameState.get_skill_state(class_id)
+	var equipped: Array[String] = GameState.get_equipped_active_skills(class_id)
+	var active_grid: GridContainer = GridContainer.new()
+	active_grid.columns = 2
+	active_grid.add_theme_constant_override("h_separation", 6)
+	active_grid.add_theme_constant_override("v_separation", 5)
+	column.add_child(active_grid)
+	for definition: Dictionary in SkillData.get_class_skills(class_id, "active"):
+		active_grid.add_child(_make_skill_cell(definition, class_id, skill_state, equipped, true))
+	var passive_grid: GridContainer = GridContainer.new()
+	passive_grid.columns = 2
+	passive_grid.add_theme_constant_override("h_separation", 6)
+	passive_grid.add_theme_constant_override("v_separation", 5)
+	column.add_child(_make_label("被動技能", 13, Color(0.68, 0.78, 0.94)))
+	column.add_child(passive_grid)
+	for definition: Dictionary in SkillData.get_class_skills(class_id, "passive"):
+		passive_grid.add_child(_make_skill_cell(definition, class_id, skill_state, equipped, false))
+	return card
+
+func _make_skill_cell(definition: Dictionary, class_id: String, skill_state: Dictionary, equipped: Array[String], active: bool) -> PanelContainer:
+	var skill_id: String = str(definition.get("id", ""))
+	var cell: PanelContainer = PanelContainer.new()
+	cell.custom_minimum_size = Vector2(420.0, 86.0)
+	cell.add_theme_stylebox_override("panel", _make_card_style())
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 6)
+	margin.add_theme_constant_override("margin_right", 6)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	cell.add_child(margin)
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	margin.add_child(row)
+	var icon: TextureRect = TextureRect.new()
+	icon.custom_minimum_size = Vector2(38.0, 38.0)
+	icon.texture = _skill_icon_texture(skill_id)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(icon)
+	var text_column: VBoxContainer = VBoxContainer.new()
+	text_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text_column)
+	var level: int = Skills.get_skill_level(skill_state, skill_id)
+	var level_text: String = "Lv.%d/%d  ·  花費 %d 點" % [level, int(definition.get("max_level", 5)), int(definition.get("skill_point_cost", 1))]
+	if active:
+		level_text += "  ·  冷卻 %.1f 秒" % float(definition.get("cooldown", 0.0))
+	else:
+		level_text += "  ·  %s" % str(definition.get("effect_text", "被動效果"))
+	text_column.add_child(_make_label("%s  %s" % [str(definition.get("name", skill_id)), level_text], 12, Color(0.88, 0.92, 1.0)))
+	text_column.add_child(_make_label(str(definition.get("description", "")), 10, Color(0.64, 0.72, 0.86)))
+	var controls: VBoxContainer = VBoxContainer.new()
+	controls.add_theme_constant_override("separation", 2)
+	row.add_child(controls)
+	var upgrade_button: Button = Button.new()
+	upgrade_button.text = "+1 點"
+	upgrade_button.focus_mode = Control.FOCUS_NONE
+	upgrade_button.add_theme_font_size_override("font_size", 11)
+	upgrade_button.disabled = GameState.get_skill_points(class_id) <= 0 or level >= int(definition.get("max_level", 5))
+	upgrade_button.pressed.connect(_on_skill_upgrade.bind(class_id, skill_id))
+	controls.add_child(upgrade_button)
+	if active:
+		var equip_row: HBoxContainer = HBoxContainer.new()
+		equip_row.add_theme_constant_override("separation", 2)
+		controls.add_child(equip_row)
+		for slot_index: int in range(2):
+			var equip_button: Button = Button.new()
+			equip_button.text = "槽%d" % (slot_index + 1)
+			equip_button.focus_mode = Control.FOCUS_NONE
+			equip_button.add_theme_font_size_override("font_size", 10)
+			equip_button.disabled = level <= 0
+			if equipped.size() > slot_index and equipped[slot_index] == skill_id:
+				equip_button.text = "已裝備"
+			equip_button.pressed.connect(_on_skill_equip.bind(class_id, skill_id, slot_index))
+			equip_row.add_child(equip_button)
+	return cell
+
+func _skill_icon_texture(skill_id: String) -> Texture2D:
+	var frames: SpriteFrames = load("res://addons/duelyst_animated_sprites/spriteframes/icons/%s.tres" % SkillData.get_skill_icon(skill_id)) as SpriteFrames
+	if frames == null or frames.get_animation_names().is_empty():
+		return null
+	return frames.get_frame_texture(frames.get_animation_names()[0], 0)
+
 func _refresh_stage_tab() -> void:
 	_clear_content(_stage_content)
-	_stage_content.add_child(_make_note("選擇已解鎖的普通關卡；目前進度會在關閉遊戲後保留。"))
-	var table: Array[Dictionary] = StageData.get_stage_table()
+	_stage_content.add_child(_make_label("難度", 15, Color(0.84, 0.90, 1.0)))
+	_updating_difficulty = true
+	_difficulty_selector = OptionButton.new()
+	_difficulty_selector.focus_mode = Control.FOCUS_NONE
+	_difficulty_selector.add_theme_font_size_override("font_size", 14)
+	var unlocked_difficulties: Array = GameState.get_unlocked_difficulties()
+	for difficulty_id: String in DifficultyData.get_difficulty_ids():
+		var unlocked: bool = unlocked_difficulties.has(difficulty_id)
+		_difficulty_selector.add_item(DifficultyData.get_difficulty_name(difficulty_id) if unlocked else "%s（未解鎖）" % DifficultyData.get_difficulty_name(difficulty_id))
+		var item_index: int = _difficulty_selector.item_count - 1
+		_difficulty_selector.set_item_metadata(item_index, difficulty_id)
+		_difficulty_selector.set_item_disabled(item_index, not unlocked)
+	var current_difficulty: String = GameState.get_current_difficulty()
+	for index: int in range(_difficulty_selector.item_count):
+		if str(_difficulty_selector.get_item_metadata(index)) == current_difficulty:
+			_difficulty_selector.select(index)
+			break
+	_difficulty_selector.tooltip_text = str(GameState.get_difficulty_definition(current_difficulty).get("description", ""))
+	_difficulty_selector.item_selected.connect(_on_difficulty_selected)
+	_updating_difficulty = false
+	_stage_content.add_child(_difficulty_selector)
+	var difficulty_description: String = str(GameState.get_difficulty_definition(current_difficulty).get("description", ""))
+	_stage_content.add_child(_make_note("選擇已解鎖的關卡；完成目前難度第 3 幕第 10 關後解鎖下一難度。\n%s" % difficulty_description))
+	var table: Array[Dictionary] = StageData.get_stage_table(current_difficulty)
 	var current_stage: int = GameState.get_current_stage()
 	for stage: Dictionary in table:
 		var stage_index: int = int(stage.get("index", 0))
@@ -391,10 +533,12 @@ func _item_tooltip(item: Dictionary) -> String:
 	return "%s\n等級 %d\n%s\n詞綴：%s" % [str(item.get("name", "")), int(item.get("level", 1)), _stat_text(str(item.get("main_stat", "")), float(item.get("main_value", 0.0)), _is_percent_stat(str(item.get("main_stat", "")))), affix_text if not affix_text.is_empty() else "無"]
 
 func _affix_text(affix: Dictionary) -> String:
-	return "%s %s" % [str(affix.get("name", "")), _stat_text(str(affix.get("stat", "")), float(affix.get("value", 0.0)), bool(affix.get("percent", false)))]
+	var stat_id: String = str(affix.get("stat", ""))
+	var percent: bool = bool(affix.get("percent", false)) or _is_percent_stat(stat_id)
+	return _stat_text(stat_id, float(affix.get("value", 0.0)), percent)
 
 func _is_percent_stat(stat_id: String) -> bool:
-	return stat_id == "crit_chance" or stat_id == "crit_damage" or stat_id.ends_with("_resistance") or stat_id == "life_steal" or stat_id == "attack_percent" or stat_id == "attack_speed_percent" or stat_id == "gold_gain" or stat_id == "xp_gain"
+	return stat_id.ends_with("_percent") or stat_id == "crit_chance" or stat_id == "crit_damage" or stat_id.ends_with("_resistance") or stat_id == "life_steal" or stat_id == "gold_gain" or stat_id == "xp_gain" or stat_id == "heal_power"
 
 func _stat_text(stat_id: String, value: float, percent: bool) -> String:
 	var label: String = stat_id
@@ -421,14 +565,22 @@ func _stat_text(stat_id: String, value: float, percent: bool) -> String:
 	elif stat_id == "life_steal":
 		label = "生命吸取"
 	elif stat_id == "attack_percent":
-		label = "攻擊%"
+		label = "攻擊"
 	elif stat_id == "attack_speed_percent":
-		label = "攻速%"
+		label = "攻速"
 	elif stat_id == "gold_gain":
-		label = "金幣獲取%"
+		label = "金幣獲取"
 	elif stat_id == "xp_gain":
-		label = "經驗獲取%"
-	return "%s %.2f" % [label, value * 100.0] if percent else "%s %.0f" % [label, value]
+		label = "經驗獲取"
+	elif stat_id == "damage_absorption_percent":
+		label = "受到傷害"
+	elif stat_id == "heal_power":
+		label = "治療效果"
+	elif stat_id == "effect_radius_percent":
+		label = "技能範圍"
+	elif stat_id == "elemental_damage_percent":
+		label = "元素傷害"
+	return "%s +%.1f%%" % [label, value * 100.0] if percent else "%s +%d" % [label, roundi(value)]
 
 func _socket_name(socket_type: String) -> String:
 	if socket_type == "decorative":
@@ -483,6 +635,21 @@ func _on_class_selected(slot_index: int, class_id: String) -> void:
 
 func _on_stage_pressed(stage_index: int) -> void:
 	stage_selected.emit(stage_index)
+
+func _on_difficulty_selected(index: int) -> void:
+	if _updating_difficulty or _difficulty_selector == null or index < 0 or index >= _difficulty_selector.item_count:
+		return
+	var difficulty_id: String = str(_difficulty_selector.get_item_metadata(index))
+	if not difficulty_id.is_empty():
+		difficulty_selected.emit(difficulty_id)
+
+func _on_skill_upgrade(class_id: String, skill_id: String) -> void:
+	GameState.upgrade_skill(class_id, skill_id)
+	refresh()
+
+func _on_skill_equip(class_id: String, skill_id: String, slot_index: int) -> void:
+	GameState.equip_active_skill(class_id, skill_id, slot_index)
+	refresh()
 
 func _on_equipment_slot_pressed(class_id: String, slot_id: String) -> void:
 	GameState.unequip_item(class_id, slot_id)

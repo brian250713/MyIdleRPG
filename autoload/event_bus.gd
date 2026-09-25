@@ -40,3 +40,7 @@ signal skills_changed(class_id: String)
 signal runes_changed
 @warning_ignore("unused_signal")
 signal offline_progress(summary: Dictionary)
+@warning_ignore("unused_signal")
+signal rare_drop(item: Dictionary)
+@warning_ignore("unused_signal")
+signal reset_completed

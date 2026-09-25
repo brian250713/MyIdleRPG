@@ -7,6 +7,7 @@ const TOTAL_STAGES: int = ACT_COUNT * STAGES_PER_ACT
 const NORMAL_DIFFICULTY: String = "普通"
 const WAVE_HEAL_RATIO: float = 0.30
 const STAGE_START_HEAL_RATIO: float = 1.0
+const PROGRESSION_LEVEL_MARGIN: int = 1
 
 static func get_stage_table(difficulty_id: String = "normal") -> Array[Dictionary]:
 	var table: Array[Dictionary] = []
@@ -51,6 +52,7 @@ static func get_stage_table(difficulty_id: String = "normal") -> Array[Dictionar
 				"act": act,
 				"stage": stage,
 				"recommended_level": base_level + level_offset,
+				"required_level": base_level + level_offset + PROGRESSION_LEVEL_MARGIN,
 				"base_level": base_level,
 				"wave_count": 5,
 				"wave_heal_ratio": WAVE_HEAL_RATIO,
@@ -69,6 +71,10 @@ static func get_stage_by_index(stage_index: int, difficulty_id: String = "normal
 
 static func get_stage_count() -> int:
 	return TOTAL_STAGES
+
+static func get_required_level(stage_index: int, difficulty_id: String = "normal") -> int:
+	var stage: Dictionary = get_stage_by_index(stage_index, difficulty_id)
+	return maxi(1, int(stage.get("required_level", int(stage.get("recommended_level", 1)) + PROGRESSION_LEVEL_MARGIN)))
 
 static func get_display_name(stage_index: int, difficulty_id: String = "normal") -> String:
 	var stage: Dictionary = get_stage_by_index(stage_index, difficulty_id)

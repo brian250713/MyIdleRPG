@@ -124,6 +124,8 @@ func _update_top_controls() -> void:
 	_expand_button.text = "收合" if WindowManager.is_expanded() else "展開"
 	var chest_counts: Dictionary = GameState.get_chest_counts()
 	_chest_label.text = "箱 白%d 藍%d 幕%d" % [int(chest_counts.get("white", 0)), int(chest_counts.get("blue", 0)), int(chest_counts.get("act_boss", 0))]
+	var chest_state: Dictionary = GameState.get_chest_state()
+	_chest_label.tooltip_text = "白箱冷卻 %.0f 秒／容量 %d\n點擊開啟下一個箱子" % [float(chest_state.get("white_cooldown", 0.0)), Chests.get_queue_capacity(chest_state)]
 	_soul_label.text = "靈魂石 %d" % GameState.get_soul_stones()
 	_open_chests_button.disabled = Chests.get_queue_size(GameState.get_chest_state()) == 0
 	_updating_controls = false

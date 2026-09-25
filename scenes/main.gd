@@ -17,6 +17,7 @@ func _ready() -> void:
 	_hud.auto_advance_changed.connect(_on_auto_advance_changed)
 	_hud.always_on_top_changed.connect(_on_always_on_top_changed)
 	_hud.open_chests_requested.connect(_on_open_chests_requested)
+	EventBus.reset_completed.connect(_on_reset_completed)
 	_expanded_panel.stage_selected.connect(_on_stage_selected)
 	_expanded_panel.difficulty_selected.connect(_on_difficulty_selected)
 	_expanded_panel.auto_advance_changed.connect(_on_auto_advance_changed)
@@ -87,6 +88,12 @@ func _on_stage_selected(stage_index: int) -> void:
 
 func _on_difficulty_selected(difficulty_id: String) -> void:
 	_battlefield.select_difficulty(difficulty_id)
+
+func _on_reset_completed() -> void:
+	WindowManager.reload_settings()
+	_battlefield.reset_campaign()
+	_expanded_panel.refresh()
+	_hud.refresh()
 
 func _on_open_chests_requested() -> void:
 	GameState.open_next_chest()

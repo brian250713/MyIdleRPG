@@ -19,6 +19,8 @@ func _run_capture() -> void:
 		game_state.call("seed_debug_act_boss")
 	game_state.call("set_setting", "expanded", expanded)
 	window_manager.call("set_expanded", expanded)
+	if OS.get_environment("CAP_NORMAL_WINDOW") == "1":
+		window_manager.call("set_normal_mode", true)
 	window_manager.call("apply_window_mode")
 
 	if OS.get_environment("CAP_DEBUG_SKILLS") == "1":
@@ -56,6 +58,8 @@ func _run_capture() -> void:
 				cube_slots.append(raw_slot.strip_edges().to_int())
 			expanded_panel.call("select_cube_slots", cube_slots)
 	await process_frame
+	if OS.get_environment("CAP_DEBUG_RARE_DROP") == "1":
+		game_state.call("debug_emit_rare_drop")
 	await _wait_for_seconds(wait_seconds)
 	await process_frame
 

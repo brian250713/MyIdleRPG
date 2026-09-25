@@ -4,8 +4,8 @@ extends RefCounted
 const WHITE_QUEUE_CAPACITY: int = 20
 const WHITE_COOLDOWN_SECONDS: float = 90.0
 const WHITE_DROP_CHANCE: float = 0.25
-const BLUE_SOUL_STONE_CHANCE: float = 0.10
-const ACT_SOUL_STONE_CHANCE: float = 0.30
+const BLUE_SOUL_STONE_CHANCE: float = 0.020
+const ACT_SOUL_STONE_CHANCE: float = 0.08
 
 static func create_state() -> Dictionary:
 	return {

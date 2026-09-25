@@ -23,6 +23,8 @@ func apply_loaded_state(loaded_state: Dictionary) -> void:
 	state = SaveCodec.normalize_state(loaded_state)
 	_offline_summary = {}
 	_sync_rune_effects()
+	var settings: Dictionary = state.get("settings", {})
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, clampf(float(settings.get("master_volume", 0.8)), 0.0, 1.0))))
 	_notify_state_changed()
 	gold_changed.emit(get_gold())
 	EventBus.gold_changed.emit(get_gold())
@@ -116,9 +118,20 @@ func set_setting(key: String, value: Variant) -> void:
 	var settings: Dictionary = state.get("settings", {})
 	settings[key] = value
 	state["settings"] = settings
+	if key == "master_volume":
+		var volume: float = clampf(float(value), 0.0, 1.0)
+		AudioServer.set_bus_volume_db(0, linear_to_db(maxf(volume, 0.0001)))
 	setting_changed.emit(key, value)
 	EventBus.setting_changed.emit(key, value)
 	_notify_state_changed()
+
+func reset_state() -> void:
+	state = SaveCodec.make_default_state()
+	_offline_summary = {}
+	_sync_rune_effects()
+	AudioServer.set_bus_volume_db(0, linear_to_db(0.8))
+	_notify_state_changed()
+	EventBus.reset_completed.emit()
 
 func get_party() -> Array:
 	var party_value: Variant = state.get("party", [])
@@ -212,6 +225,17 @@ func get_lead_level() -> int:
 	if lead_value is Dictionary:
 		return int(lead_value.get("level", 1))
 	return 1
+
+func get_stage_level_requirement(stage_index: int, difficulty_id: String = "") -> int:
+	var safe_difficulty_id: String = difficulty_id if not difficulty_id.is_empty() else get_current_difficulty()
+	return StageData.get_required_level(stage_index, safe_difficulty_id)
+
+func is_stage_level_ready(stage_index: int, difficulty_id: String = "") -> bool:
+	return get_lead_level() >= get_stage_level_requirement(stage_index, difficulty_id)
+
+func get_stage_level_gate_text(stage_index: int, difficulty_id: String = "") -> String:
+	var safe_difficulty_id: String = difficulty_id if not difficulty_id.is_empty() else get_current_difficulty()
+	return "等級不足：需 Lv.%d（目前 Lv.%d）" % [get_stage_level_requirement(stage_index, safe_difficulty_id), get_lead_level()]
 
 func get_unlocked_party_slots() -> int:
 	var stored_unlocked: int = clampi(int(state.get("unlocked_party_slots", 1)), 1, 3)
@@ -627,7 +651,11 @@ func open_chest(queue_index: int) -> Dictionary:
 	var items: Array = result.get("items", [])
 	for item_value: Variant in items:
 		if item_value is Dictionary:
-			add_item(item_value)
+			var item: Dictionary = item_value
+			add_item(item)
+			var rarity_index: int = ItemData.get_rarity_ids().find(str(item.get("rarity", "common")))
+			if rarity_index >= ItemData.get_rarity_ids().find("epic"):
+				EventBus.rare_drop.emit(item)
 	var materials: Array = result.get("materials", [])
 	for material_value: Variant in materials:
 		if material_value is Dictionary:
@@ -746,6 +774,11 @@ func seed_debug_act_boss() -> void:
 	state["soul_stones"] = 0
 	state["paid_act_bosses"] = {}
 	_notify_state_changed()
+
+func debug_emit_rare_drop() -> void:
+	var debug_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	debug_rng.seed = 424245
+	EventBus.rare_drop.emit(ItemGen.generate_item(18, debug_rng, "epic", "knight", "weapon"))
 
 func seed_debug_runes() -> void:
 	var levels: Dictionary = {}

@@ -124,8 +124,14 @@ func _detect_capture_mode() -> bool:
 func _detect_test_mode() -> bool:
 	if OS.get_environment("MYIDLE_TEST_MODE") == "1":
 		return true
+	# Any explicit save-path/tool invocation is isolated; fail closed if a
+	# script launches before its environment setup has completed.
+	if not OS.get_environment("MYIDLE_SAVE_PATH").is_empty():
+		return true
 	for argument: String in _all_command_arguments():
-		if argument.ends_with("tests/run_tests.gd") or argument.ends_with("tests/test_worker.gd"):
+		if argument.begins_with("--save-path") or argument == "--save-path":
+			return true
+		if argument.ends_with("tests/run_tests.gd") or argument.ends_with("tests/test_worker.gd") or (argument.contains("tools/") and argument.ends_with(".gd")):
 			return true
 	return false
 

@@ -7,12 +7,12 @@ static func xp_to_next(level: int) -> int:
 	if level >= MAX_LEVEL:
 		return 0
 	var safe_level: int = maxi(1, level)
-	return maxi(1, int(round(20.0 * pow(float(safe_level), 1.8))))
+	return maxi(1, int(round(20.0 * pow(float(safe_level), 2.88))))
 
 static func experience_reward(monster_level: int, hero_level: int, multiplier: float = 1.0) -> int:
 	var safe_monster_level: int = maxi(1, monster_level)
 	var safe_hero_level: int = maxi(1, hero_level)
-	var base_reward: float = 18.0 * pow(float(safe_monster_level), 1.45)
+	var base_reward: float = 18.0 * pow(float(safe_monster_level), 1.0)
 	var level_difference: int = safe_hero_level - safe_monster_level
 	var penalty_factor: float = 1.0
 	if level_difference >= 10:

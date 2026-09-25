@@ -23,6 +23,11 @@ var _cube_filter_index: int = 0
 var _cube_selected_slots: Array[int] = []
 var _auto_setting_button: CheckButton
 var _topmost_setting_button: CheckButton
+var _normal_mode_button: CheckButton
+var _volume_slider: HSlider
+var _volume_label: Label
+var _reset_button: Button
+var _reset_step: int = 0
 var _auto_open_buttons: Dictionary = {}
 var _auto_sell_buttons: Dictionary = {}
 var _updating_settings: bool = false
@@ -228,6 +233,25 @@ func _build_settings_tab() -> void:
 	_topmost_setting_button.focus_mode = Control.FOCUS_NONE
 	_topmost_setting_button.toggled.connect(_on_topmost_setting_toggled)
 	column.add_child(_topmost_setting_button)
+	_normal_mode_button = CheckButton.new()
+	_normal_mode_button.text = "一般視窗模式（可調整大小）"
+	_normal_mode_button.focus_mode = Control.FOCUS_NONE
+	_normal_mode_button.toggled.connect(_on_normal_mode_toggled)
+	column.add_child(_normal_mode_button)
+	var volume_row: HBoxContainer = HBoxContainer.new()
+	volume_row.add_theme_constant_override("separation", 6)
+	column.add_child(volume_row)
+	volume_row.add_child(_make_label("主音量", 13, Color(0.80, 0.86, 0.96)))
+	_volume_slider = HSlider.new()
+	_volume_slider.min_value = 0.0
+	_volume_slider.max_value = 1.0
+	_volume_slider.step = 0.05
+	_volume_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_volume_slider.focus_mode = Control.FOCUS_NONE
+	_volume_slider.value_changed.connect(_on_volume_changed)
+	volume_row.add_child(_volume_slider)
+	_volume_label = _make_label("80%", 12, Color(0.72, 0.80, 0.94))
+	volume_row.add_child(_volume_label)
 	column.add_child(_make_label("寶箱自動開啟", 14, Color(0.80, 0.86, 0.96)))
 	for chest_type: String in ["white", "blue", "act_boss"]:
 		var button: CheckButton = CheckButton.new()
@@ -244,7 +268,12 @@ func _build_settings_tab() -> void:
 		button.toggled.connect(_on_auto_sell_toggled.bind(rarity_id))
 		column.add_child(button)
 		_auto_sell_buttons[rarity_id] = button
-	column.add_child(_make_note("設定會自動儲存；視窗拖曳可按住戰場背景。"))
+	column.add_child(_make_note("設定會自動儲存；一般視窗模式可拖曳、調整大小，位置會在啟動時限制在目前螢幕內。"))
+	_reset_button = Button.new()
+	_reset_button.text = "重置存檔"
+	_reset_button.focus_mode = Control.FOCUS_NONE
+	_reset_button.pressed.connect(_on_reset_button_pressed)
+	column.add_child(_reset_button)
 
 func _refresh_settings_tab() -> void:
 	if _auto_setting_button == null or _topmost_setting_button == null:
@@ -252,6 +281,10 @@ func _refresh_settings_tab() -> void:
 	_updating_settings = true
 	_auto_setting_button.button_pressed = bool(GameState.get_setting("auto_advance", true))
 	_topmost_setting_button.button_pressed = bool(GameState.get_setting("always_on_top", true))
+	_normal_mode_button.button_pressed = bool(GameState.get_setting("normal_window_mode", false))
+	var volume: float = clampf(float(GameState.get_setting("master_volume", 0.8)), 0.0, 1.0)
+	_volume_slider.value = volume
+	_volume_label.text = "%d%%" % roundi(volume * 100.0)
 	for chest_type: String in ["white", "blue", "act_boss"]:
 		var chest_button: CheckButton = _auto_open_buttons[chest_type]
 		chest_button.button_pressed = bool(GameState.get_setting("auto_open_%s" % chest_type, false))
@@ -707,7 +740,7 @@ func _refresh_stage_tab() -> void:
 	_updating_difficulty = false
 	_stage_content.add_child(_difficulty_selector)
 	var difficulty_description: String = str(GameState.get_difficulty_definition(current_difficulty).get("description", ""))
-	_stage_content.add_child(_make_note("選擇已解鎖的關卡；完成目前難度第 3 幕第 10 關後解鎖下一難度。\n%s" % difficulty_description))
+	_stage_content.add_child(_make_note("選擇已解鎖的關卡；進入下一關需要達到建議等級 +%d，未達標時會繼續刷目前關卡。完成目前難度第 3 幕第 10 關後解鎖下一難度。\n%s" % [StageData.PROGRESSION_LEVEL_MARGIN, difficulty_description]))
 	if GameState.get_soul_stones() <= 0:
 		_stage_content.add_child(_make_label("幕首領：需要靈魂石；沒有石頭時會在第 9 關繼續刷怪。", 13, Color(1.0, 0.72, 0.42)))
 	var table: Array[Dictionary] = StageData.get_stage_table(current_difficulty)
@@ -722,10 +755,11 @@ func _refresh_stage_tab() -> void:
 			requirement_text = "  ·  需要靈魂石"
 		elif bool(stage.get("is_act_boss", false)) and str(requirement.get("text", "")) == "已支付靈魂石":
 			requirement_text = "  ·  已支付靈魂石"
-		button.text = "%s%s  ·  建議 Lv.%d  ·  %d 波%s%s" % [str(stage.get("display_name", "普通 1-1")), "（目前）" if is_current else "", int(stage.get("recommended_level", 1)), int(stage.get("wave_count", 5)), "  ·  首領" if bool(stage.get("is_act_boss", false)) else "", requirement_text]
+		var level_text: String = "  ·  進入門檻 Lv.%d" % int(stage.get("required_level", stage.get("recommended_level", 1)))
+		button.text = "%s%s  ·  建議 Lv.%d%s  ·  %d 波%s%s" % [str(stage.get("display_name", "普通 1-1")), "（目前）" if is_current else "", int(stage.get("recommended_level", 1)), level_text, int(stage.get("wave_count", 5)), "  ·  首領" if bool(stage.get("is_act_boss", false)) else "", requirement_text]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_NONE
-		button.disabled = stage_index > GameState.get_unlocked_stage()
+		button.disabled = stage_index > GameState.get_unlocked_stage() or (stage_index > current_stage and not GameState.is_stage_level_ready(stage_index, current_difficulty))
 		button.pressed.connect(_on_stage_pressed.bind(stage_index))
 		_stage_content.add_child(button)
 
@@ -970,6 +1004,28 @@ func _on_auto_sell_toggled(enabled: bool, rarity_id: String) -> void:
 	if _updating_settings:
 		return
 	GameState.set_setting("auto_sell_%s" % rarity_id, enabled)
+
+func _on_normal_mode_toggled(enabled: bool) -> void:
+	if _updating_settings:
+		return
+	WindowManager.set_normal_mode(enabled)
+
+func _on_volume_changed(value: float) -> void:
+	if _updating_settings:
+		return
+	GameState.set_setting("master_volume", clampf(value, 0.0, 1.0))
+	_volume_label.text = "%d%%" % roundi(clampf(value, 0.0, 1.0) * 100.0)
+
+func _on_reset_button_pressed() -> void:
+	if _reset_step == 0:
+		_reset_step = 1
+		_reset_button.text = "再按一次確認重置"
+		return
+	_reset_step = 0
+	_reset_button.text = "重置存檔"
+	GameState.reset_state()
+	SaveManager.save_game()
+	refresh()
 
 func _on_stage_changed(_stage_index: int, _display_name: String) -> void:
 	_refresh_stage_tab()

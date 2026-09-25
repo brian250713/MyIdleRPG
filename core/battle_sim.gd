@@ -26,6 +26,10 @@ static func simulate_stage(stage_index: int, difficulty_id: String = "normal", h
 	var seed_value: int = int(options.get("seed", DEFAULT_SEED))
 	var wave_heal_ratio: float = clampf(float(options.get("wave_heal_ratio", StageData.WAVE_HEAL_RATIO)), 0.0, 1.0)
 	var use_skills: bool = bool(options.get("use_skills", true))
+	var simulation_step: float = clampf(float(options.get("simulation_step", SIMULATION_STEP)), 0.02, 0.50)
+	var contact_delay_melee: float = maxf(0.0, float(options.get("contact_delay_melee", DEFAULT_CONTACT_DELAY_MELEE)))
+	var contact_delay_ranged: float = maxf(0.0, float(options.get("contact_delay_ranged", DEFAULT_CONTACT_DELAY_RANGED)))
+	var max_steps: int = maxi(1, int(ceil(max_time / simulation_step)) + 4)
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var heroes: Array[Dictionary] = _prepare_heroes(hero_specs)
@@ -58,7 +62,10 @@ static func simulate_stage(stage_index: int, difficulty_id: String = "normal", h
 		"hero_hp_at_boss_ratio": 0.0,
 		"seed": seed_value,
 		"wave_heal_ratio": wave_heal_ratio,
-		"use_skills": use_skills
+		"use_skills": use_skills,
+		"simulation_step": simulation_step,
+		"contact_delay_melee": contact_delay_melee,
+		"contact_delay_ranged": contact_delay_ranged
 	}
 	var elapsed: float = 0.0
 	var waves_completed: int = 0
@@ -77,21 +84,21 @@ static func simulate_stage(stage_index: int, difficulty_id: String = "normal", h
 		result["boss"] = _boss_snapshot(monsters, heroes)
 		result["waves_cleared"] = int(stage.get("wave_count", 5))
 		phase = "boss"
-	while elapsed < max_time and step_count < MAX_SIMULATION_STEPS:
+	while elapsed < max_time and step_count < max_steps:
 		step_count += 1
 		if not _has_living_hero(heroes):
 			result["outcome"] = "lose"
 			result["time_taken"] = elapsed
 			break
 		if phase == "waiting_wave":
-			phase_timer -= SIMULATION_STEP
+			phase_timer -= simulation_step
 			if phase_timer <= 0.0:
 				monsters = _spawn_wave(stage, waves_completed, safe_difficulty_id)
 				wave_start_time = elapsed
 				wave_start_hp = _party_hp(heroes)
 				phase = "wave"
 		elif phase == "wave":
-			_simulate_combat_step(heroes, monsters, elapsed - wave_start_time, rng, use_skills, result)
+			_simulate_combat_step(heroes, monsters, elapsed - wave_start_time, rng, use_skills, result, simulation_step, contact_delay_melee, contact_delay_ranged)
 			if not _has_living_monster(monsters):
 				var wave_result: Dictionary = _make_wave_result(waves_completed + 1, elapsed - wave_start_time, wave_start_hp, heroes, monsters, result)
 				(result["wave_results"] as Array).append(wave_result)
@@ -105,7 +112,7 @@ static func simulate_stage(stage_index: int, difficulty_id: String = "normal", h
 					phase = "waiting_boss"
 					phase_timer = DEFAULT_BOSS_SPAWN_DELAY
 		elif phase == "waiting_boss":
-			phase_timer -= SIMULATION_STEP
+			phase_timer -= simulation_step
 			if phase_timer <= 0.0:
 				monsters = _spawn_boss(stage, safe_difficulty_id)
 				result["boss_reached"] = true
@@ -115,14 +122,14 @@ static func simulate_stage(stage_index: int, difficulty_id: String = "normal", h
 				result["boss"] = _boss_snapshot(monsters, heroes)
 				phase = "boss"
 		elif phase == "boss":
-			_simulate_combat_step(heroes, monsters, elapsed - float(result["boss_start_time"]), rng, use_skills, result)
+			_simulate_combat_step(heroes, monsters, elapsed - float(result["boss_start_time"]), rng, use_skills, result, simulation_step, contact_delay_melee, contact_delay_ranged)
 			if not _has_living_monster(monsters):
 				result["boss_defeated"] = true
 				result["win"] = true
 				result["outcome"] = "win"
 				result["time_taken"] = elapsed
 				break
-		elapsed += SIMULATION_STEP
+		elapsed += simulation_step
 	if not bool(result["win"]) and str(result["outcome"]) == "timeout":
 		result["outcome"] = "lose" if not _has_living_hero(heroes) else "timeout"
 		result["time_taken"] = elapsed
@@ -253,16 +260,19 @@ static func _make_monster_state(monster_id: String, definition: Dictionary, inde
 		"taunt_time": 0.0
 	}
 
-static func _simulate_combat_step(heroes: Array[Dictionary], monsters: Array[Dictionary], combat_elapsed: float, rng: RandomNumberGenerator, use_skills: bool, result: Dictionary) -> void:
+static func _simulate_combat_step(heroes: Array[Dictionary], monsters: Array[Dictionary], combat_elapsed: float, rng: RandomNumberGenerator, use_skills: bool, result: Dictionary, simulation_step: float = SIMULATION_STEP, contact_delay_melee: float = DEFAULT_CONTACT_DELAY_MELEE, contact_delay_ranged: float = DEFAULT_CONTACT_DELAY_RANGED) -> void:
 	for hero: Dictionary in heroes:
-		_tick_temporary_effects(hero)
+		_tick_temporary_effects(hero, simulation_step)
+		for raw_skill_id: Variant in hero.get("cooldowns", {}).keys():
+			var skill_id: String = str(raw_skill_id)
+			hero["cooldowns"][skill_id] = maxf(0.0, float(hero["cooldowns"].get(skill_id, 0.0)) - simulation_step)
 		if bool(hero.get("is_dead", false)):
 			continue
 		if use_skills:
 			_try_cast_skill(hero, heroes, monsters, rng, result)
 		if bool(hero.get("is_dead", false)):
 			continue
-		if not _is_engaged(hero, combat_elapsed):
+		if not _is_engaged(hero, combat_elapsed, contact_delay_melee, contact_delay_ranged):
 			continue
 		if float(hero.get("attack_timer", 0.0)) > 0.0 or float(hero.get("stun_time", 0.0)) > 0.0:
 			continue
@@ -273,10 +283,10 @@ static func _simulate_combat_step(heroes: Array[Dictionary], monsters: Array[Dic
 		hero["attack_timer"] = 1.0 / maxf(0.1, _hero_attack_speed(hero))
 		_apply_monster_damage(target, int(damage.get("amount", 1)), bool(damage.get("is_crit", false)), str(hero.get("element", "physical")), heroes, result)
 	for monster: Dictionary in monsters:
-		_tick_temporary_effects(monster)
+		_tick_temporary_effects(monster, simulation_step)
 		if bool(monster.get("is_dead", false)):
 			continue
-		if not _is_engaged(monster, combat_elapsed):
+		if not _is_engaged(monster, combat_elapsed, contact_delay_melee, contact_delay_ranged):
 			continue
 		if float(monster.get("attack_timer", 0.0)) > 0.0 or float(monster.get("stun_time", 0.0)) > 0.0:
 			continue
@@ -287,22 +297,22 @@ static func _simulate_combat_step(heroes: Array[Dictionary], monsters: Array[Dic
 		monster["attack_timer"] = 1.0 / maxf(0.1, float(monster.get("stats", {}).get("attack_speed", 1.0)))
 		_apply_hero_damage(target_hero, int(hero_damage.get("amount", 1)), bool(hero_damage.get("is_crit", false)), str(monster.get("element", "physical")), result)
 
-static func _is_engaged(unit: Dictionary, combat_elapsed: float) -> bool:
+static func _is_engaged(unit: Dictionary, combat_elapsed: float, contact_delay_melee: float = DEFAULT_CONTACT_DELAY_MELEE, contact_delay_ranged: float = DEFAULT_CONTACT_DELAY_RANGED) -> bool:
 	var attack_type: String = str(unit.get("attack_type", "melee"))
-	var delay: float = DEFAULT_CONTACT_DELAY_RANGED if attack_type == "ranged" else DEFAULT_CONTACT_DELAY_MELEE
+	var delay: float = contact_delay_ranged if attack_type == "ranged" else contact_delay_melee
 	return combat_elapsed >= delay
 
-static func _tick_temporary_effects(unit: Dictionary) -> void:
-	unit["attack_timer"] = maxf(0.0, float(unit.get("attack_timer", 0.0)) - SIMULATION_STEP)
-	unit["stun_time"] = maxf(0.0, float(unit.get("stun_time", 0.0)) - SIMULATION_STEP)
-	unit["slow_time"] = maxf(0.0, float(unit.get("slow_time", 0.0)) - SIMULATION_STEP)
+static func _tick_temporary_effects(unit: Dictionary, simulation_step: float = SIMULATION_STEP) -> void:
+	unit["attack_timer"] = maxf(0.0, float(unit.get("attack_timer", 0.0)) - simulation_step)
+	unit["stun_time"] = maxf(0.0, float(unit.get("stun_time", 0.0)) - simulation_step)
+	unit["slow_time"] = maxf(0.0, float(unit.get("slow_time", 0.0)) - simulation_step)
 	if float(unit.get("slow_time", 0.0)) <= 0.0:
 		unit["slow_multiplier"] = 1.0
-	unit["party_buff_time"] = maxf(0.0, float(unit.get("party_buff_time", 0.0)) - SIMULATION_STEP)
+	unit["party_buff_time"] = maxf(0.0, float(unit.get("party_buff_time", 0.0)) - simulation_step)
 	if float(unit.get("party_buff_time", 0.0)) <= 0.0:
 		unit["party_buff_attack"] = 0.0
 		unit["party_buff_attack_speed"] = 0.0
-	unit["burst_time"] = maxf(0.0, float(unit.get("burst_time", 0.0)) - SIMULATION_STEP)
+	unit["burst_time"] = maxf(0.0, float(unit.get("burst_time", 0.0)) - simulation_step)
 	if float(unit.get("burst_time", 0.0)) <= 0.0:
 		unit["burst_multiplier"] = 1.0
 

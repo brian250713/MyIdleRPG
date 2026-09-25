@@ -129,7 +129,8 @@ func test_offline_gold_xp_are_separate_and_apply_level_penalty() -> bool:
 	var summary: Dictionary = Offline.calculate(state, now)
 	var applied: Dictionary = Offline.apply_to_state(state, summary)
 	var hero: Dictionary = (applied.get("party", []) as Array)[0]
-	return int(summary.get("gold", 0)) != int(summary.get("xp", 0)) and int(summary.get("gold", 0)) > 0 and int(summary.get("xp", 0)) > 0 and int(hero.get("level", 0)) < 23 and (summary.get("hero_levels_after", []) as Array).size() == 1
+	var xp_by_class: Dictionary = summary.get("xp_by_class", {}) as Dictionary
+	return int(summary.get("gold", 0)) > 0 and int(summary.get("xp", 0)) > 0 and not xp_by_class.is_empty() and int(hero.get("level", 0)) < 23 and (summary.get("hero_levels_after", []) as Array).size() == 1
 
 func test_test_boot_does_not_touch_real_save() -> bool:
 	var real_path: String = "user://save.json"

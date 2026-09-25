@@ -40,7 +40,13 @@ func _ready() -> void:
 	_world_layer = Node2D.new()
 	_world_layer.name = "WorldLayer"
 	add_child(_world_layer)
+	EventBus.hero_leveled_up.connect(_on_hero_leveled_up)
+	EventBus.rare_drop.connect(_on_rare_drop)
 	set_process(true)
+
+func reset_campaign() -> void:
+	_progression = null
+	start_campaign()
 
 func start_campaign() -> void:
 	if _progression != null:
@@ -66,6 +72,9 @@ func start_campaign() -> void:
 func select_stage(stage_index: int) -> void:
 	if _progression == null:
 		start_campaign()
+		return
+	if stage_index > _stage_index and not GameState.is_stage_level_ready(stage_index, GameState.get_current_difficulty()):
+		_last_status = GameState.get_stage_level_gate_text(stage_index, GameState.get_current_difficulty())
 		return
 	var result: String = _progression.select_stage(stage_index)
 	if result == "locked":
@@ -549,6 +558,7 @@ func _has_boss_monster() -> bool:
 	return false
 
 func _spawn_skill_effect(effect_position: Vector2, result: Dictionary) -> void:
+	_trim_transient_nodes()
 	var effect: SkillEffect = SkillEffect.new()
 	_world_layer.add_child(effect)
 	effect.position = effect_position
@@ -570,6 +580,7 @@ func _perform_attack(attacker: BattleUnit, target: BattleUnit) -> void:
 	var amount: int = int(result["amount"])
 	var is_crit: bool = bool(result["is_crit"])
 	if attacker.attack_type == "ranged":
+		_trim_transient_nodes()
 		var projectile: BattleProjectile = ProjectileScene.instantiate() as BattleProjectile
 		if projectile == null:
 			return
@@ -614,7 +625,8 @@ func _check_stage_completion() -> void:
 		elif _progression.get_phase() == StageProgression.Phase.BOSS and _boss_pending:
 			_boss_pending = false
 			_progression.on_boss_defeated()
-			GameState.unlock_stage(mini(StageData.get_stage_count() - 1, _stage_index + 1))
+			if _can_advance_to_next_progression():
+				GameState.unlock_stage(mini(StageData.get_stage_count() - 1, _stage_index + 1))
 			if bool(_stage_data.get("is_act_boss", false)):
 				GameState.mark_act_boss_cleared(_stage_index)
 			_last_status = "%s 已通關" % StageData.get_display_name(_stage_index, GameState.get_current_difficulty())
@@ -640,7 +652,21 @@ func _fully_heal_party() -> void:
 		if is_instance_valid(hero) and hero.is_alive():
 			hero.heal(int(round(hero.max_hp * start_heal_ratio)))
 
+func _can_advance_to_next_progression() -> bool:
+	if _stage_index < StageData.get_stage_count() - 1:
+		return GameState.is_stage_level_ready(_stage_index + 1, GameState.get_current_difficulty())
+	var next_difficulty: String = Difficulty.get_next_difficulty(GameState.get_current_difficulty())
+	return next_difficulty.is_empty() or GameState.is_stage_level_ready(0, next_difficulty)
+
 func _advance_after_clear() -> void:
+	if not _can_advance_to_next_progression():
+		if _stage_index < StageData.get_stage_count() - 1:
+			_last_status = "%s，%s；繼續刷目前關卡" % [GameState.get_stage_level_gate_text(_stage_index + 1, GameState.get_current_difficulty()), "尚未解鎖下一關"]
+		else:
+			var next_difficulty: String = Difficulty.get_next_difficulty(GameState.get_current_difficulty())
+			_last_status = "%s，%s；繼續刷目前關卡" % [GameState.get_stage_level_gate_text(0, next_difficulty), "尚未進入下一難度"]
+		_begin_stage(_stage_index)
+		return
 	var result: String = _progression.advance_to_next_stage()
 	if result == "next_stage_started":
 		_begin_stage(_progression.get_current_stage())
@@ -656,6 +682,7 @@ func _advance_after_clear() -> void:
 func _on_unit_damaged(unit: BattleUnit, amount: int, is_crit: bool, damage_element: String = "physical") -> void:
 	if not is_instance_valid(unit):
 		return
+	_trim_transient_nodes()
 	var hit_effect: BattleHitEffect = HitEffectScene.instantiate() as BattleHitEffect
 	if hit_effect != null:
 		_world_layer.add_child(hit_effect)
@@ -687,12 +714,45 @@ func _on_unit_died(unit: BattleUnit) -> void:
 	_last_status = "%s 被擊敗" % unit.display_name
 
 func _spawn_chest_feedback(drop_position: Vector2, chest: Dictionary) -> void:
+	_trim_transient_nodes()
 	var feedback: ChestDropFeedback = ChestDropFeedbackScene.instantiate() as ChestDropFeedback
 	if feedback == null:
 		return
 	_world_layer.add_child(feedback)
 	feedback.position = drop_position + Vector2(0.0, -48.0)
 	feedback.setup(str(chest.get("type", "white")))
+
+func _on_hero_leveled_up(class_id: String, level: int) -> void:
+	var position: Vector2 = Vector2(120.0, 76.0)
+	for hero: BattleUnit in _heroes:
+		if is_instance_valid(hero) and hero.class_id == class_id:
+			position = hero.position + Vector2(0.0, -70.0)
+			break
+	var hero_class_name: String = str(ClassData.get_class_definition(class_id).get("name", class_id))
+	_spawn_floating_text("升級！%s Lv.%d" % [hero_class_name, level], Color(1.0, 0.88, 0.35), 15, position - Vector2(0.0, 18.0))
+
+func _on_rare_drop(item: Dictionary) -> void:
+	var item_name: String = str(item.get("name", "史詩裝備"))
+	var rarity_color: Color = ItemData.get_rarity_color(str(item.get("rarity", "epic"))).lerp(Color(1.0, 1.0, 1.0), 0.65)
+	_spawn_floating_text("史詩以上掉落：%s" % item_name, rarity_color, 16, Vector2(maxf(180.0, size.x * 0.5), 52.0))
+
+func _spawn_floating_text(message: String, color: Color, font_size: int, text_position: Vector2) -> void:
+	_trim_transient_nodes()
+	var text: FloatingText = FloatingText.new()
+	_world_layer.add_child(text)
+	text.position = _clamp_effect_position(text_position)
+	text.setup(message, color, font_size)
+
+func _trim_transient_nodes() -> void:
+	var transient_nodes: Array[Node] = []
+	for child: Node in _world_layer.get_children():
+		if child.is_in_group("transient") or child is BattleProjectile or child is DamageNumber or child is BattleHitEffect or child is ChestDropFeedback or child is SkillEffect:
+			transient_nodes.append(child)
+	var max_nodes: int = 96
+	while transient_nodes.size() > max_nodes:
+		var oldest: Node = transient_nodes.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
 
 func _find_nearest_enemy(unit: BattleUnit, candidates: Array[BattleUnit]) -> BattleUnit:
 	if unit.taunt_time > 0.0 and unit.taunt_target_id != 0:

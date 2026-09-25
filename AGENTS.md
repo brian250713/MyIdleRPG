@@ -18,5 +18,6 @@ Godot 4.7 idle RPG (TBH-like taskbar game). Full spec: `docs/DESIGN.md` — read
 - Tests: `<godot> --headless --path . -s res://tests/run_tests.gd` (the runner assigns `user://test_runner_save.json` to every child; must exit 0)
 - Smoke-run main scene for N frames with an isolated save (PowerShell): `$env:MYIDLE_SAVE_PATH='user://smoke_save.json'; <godot> --headless --path . --quit-after 600`
 - Capture runs use `user://capture_save.json`; `SaveManager` also accepts `MYIDLE_SAVE_PATH` or `--save-path=<path>` so tests, smoke runs, and captures never need the real `user://save.json`.
+- Balance/soak tools also force test mode and use `user://balance_report_save.json` / `user://soak_save.json`; pass both `MYIDLE_SAVE_PATH` and `--save-path` when launching them. Soak uses `time_scale=8` and accepts `SOAK_SIM_SECONDS` for proportional runs.
 
 Before finishing any task: run import, run tests, run the smoke-run, and confirm there are no `SCRIPT ERROR` / `ERROR` lines in the output.
